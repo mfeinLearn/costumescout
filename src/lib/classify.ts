@@ -119,17 +119,46 @@ async function clothesIndexes(piece: string, images: string[]) {
   return parsed.keep.map(Number).filter((index) => index >= 0 && index < images.length);
 }
 
-async function exaPick(piece: string, place: string) {
+type Dept = "men" | "women" | "unknown";
+
+function pageDept(text: string): Dept | "either" {
+  const blob = text.toLowerCase();
+  const women = /\b(women'?s|woman|ladies|girls)\b/.test(blob);
+  const men = /\b(men'?s|mens|boys)\b/.test(blob) || (/\bmen\b/.test(blob) && !women);
+  if (women && !men) return "women";
+  if (men && !women) return "men";
+  return "either";
+}
+
+async function sexAgent(image: string): Promise<Dept> {
+  const text = await grok([
+    {
+      role: "user",
+      content: [
+        { type: "input_image", image_url: image, detail: "low" },
+        {
+          type: "input_text",
+          text: 'Classify the sex of the actor or character in this costume photo. Return JSON only: {"sex":"male"} or {"sex":"female"} or {"sex":"unknown"}. Use unknown if you cannot tell. Do not guess.',
+        },
+      ],
+    },
+  ]);
+  const sex = String(parseJson(text)?.sex ?? "").toLowerCase();
+  if (sex === "male") return "men";
+  if (sex === "female") return "women";
+  return "unknown";
+}
+  async function exaPick(piece: string, place: string, dept: Dept) {
   const key = process.env.EXA_API_KEY?.trim();
   if (!key) return null;
   const { default: Exa } = await import("exa-js");
   const exa = new Exa(key);
-  const result = await exa.search(`buy ${piece} clothing product page near ${place}`, {
+  const label = dept === "men" ? "men's" : dept === "women" ? "women's" : "";
+  const result = await exa.search(`buy ${label} ${piece} clothing product page near ${place}`.replace(/\s+/g, " "), {
     type: "auto",
     userLocation: "US",
     numResults: 4,
-    systemPrompt:
-      "Prefer a retailer product page for this garment. Skip news, maps, social posts, and store homepages.",
+    systemPrompt: `Prefer a retailer product page for this ${label} garment. Skip the other clothing department, news, maps, social posts, and store homepages.`.replace(/\s+/g, " "),
     excludeDomains: [
       "wikipedia.org",
       "youtube.com",
@@ -141,7 +170,14 @@ async function exaPick(piece: string, place: string) {
     ],
     contents: { highlights: true },
   });
-  const pages = (result.results ?? []).filter((item) => item.url).slice(0, 4);
+  const pages = (result.results ?? [])
+    .filter((item) => item.url)
+    .filter((item) => {
+      if (dept === "unknown") return true;
+      const found = pageDept(`${item.title ?? ""} ${item.url}`);
+      return found === "either" || found === dept;
+    })
+    .slice(0, 4);
   const candidates: { url: string; store: string; image: string }[] = [];
   for (const page of pages) {
     const images = await pageImages(page.url);
@@ -290,9 +326,10 @@ export const classifyLook = createServerFn({ method: "POST" })
     exa: boolean;
     notes: string[];
   }> => {
-    const [character, layers] = await Promise.all([
+    const [character, layers, dept] = await Promise.all([
       characterAgent(data.image),
       layersAgent(data.image),
+      sexAgent(data.image),
     ]);
     const pieces = await clothesAgent(data.image, layers);
     const look: Look = {
@@ -312,7 +349,7 @@ export const classifyLook = createServerFn({ method: "POST" })
         : "Brooklyn, New York";
     const listings = await Promise.all(
       look.pieces.map(async (piece) => {
-        const listing = await exaPick(piece, place).catch(() => null);
+        const listing = await exaPick(piece, place, dept).catch(() => null);
         return {
           piece,
           url: listing?.url ?? "",
@@ -352,6 +389,7 @@ export const classifyLook = createServerFn({ method: "POST" })
       `Agent 3, clothes check: ${pieces.join(", ") || "none kept"}.`,
       `Agent 4, near ${place}: ${found.filter((item) => item.shop !== "Not near you" && item.url).length} of ${found.length} are close.`,
       `Agent 5, live link: ${liveFlags.filter(Boolean).length} of ${listings.length} pages loaded. 404s were dropped.`,
+      `Agent 6, sex: ${dept === "men" ? "male" : dept === "women" ? "female" : "not clear"}. ${dept === "unknown" ? "No clothing filter." : "Other department dropped."}`,
     ];
 
     return {
