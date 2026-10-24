@@ -378,9 +378,11 @@ export function CostumeScout() {
                     {nearby.map((item) => (
                       <li key={item.id} className="rounded-xl border border-line bg-bg px-3 py-3">
                         <div className="flex items-start gap-3">
-                          <a href={item.url} target="_blank" rel="noreferrer" className="shrink-0">
-                            <img src={item.image} alt="" className="size-16 rounded-lg object-cover" />
-                          </a>
+                          {item.image ? (
+                            <a href={item.url} target="_blank" rel="noreferrer" className="shrink-0">
+                              <img src={item.image} alt="" className="size-16 rounded-lg object-cover" />
+                            </a>
+                          ) : null}
                           <div className="min-w-0 flex-1">
                             <div className="flex items-start justify-between gap-3">
                               <p className="font-medium">{item.piece}</p>
@@ -538,15 +540,17 @@ export function CostumeScout() {
 
                 {pieces.length > 0 ? (
                   <div>
-                    <p className="text-sm font-medium">Pieces in the photo</p>
+                    <p className="text-sm font-medium">Photos from the stores</p>
                     <ul className="mt-3 grid grid-cols-2 gap-3">
                       {pieces.map((piece) => (
                         <li key={piece.name} className="rounded-2xl border border-line bg-surface p-3">
-                          <img
-                            src={piece.image}
-                            alt=""
-                            className="aspect-square w-full rounded-xl object-cover"
-                          />
+                          <a href={piece.url} target="_blank" rel="noreferrer">
+                            <img
+                              src={piece.image}
+                              alt=""
+                              className="aspect-square w-full rounded-xl object-cover"
+                            />
+                          </a>
                           <p className="mt-2 text-sm font-medium">{piece.name}</p>
                           <ul className="mt-2 space-y-1.5">
                             {(pieceHits[piece.name] ?? []).length === 0 ? (

@@ -26,16 +26,16 @@ export const SCOUT_PRICE = 4;
 export const VERIFIED_PRICE = 7;
 export const LISTING_CUT = 0.12;
 
-export type Piece = { name: string; image: string };
+export type Piece = { name: string; image: string; url: string };
 
 const LOOKS: { keys: string[]; pieces: Piece[] }[] = [
   {
     keys: ["mac fly", "macfly", "mac-fly", "marty", "mcfly", "mc fly"],
     pieces: [
-      { name: "Red puffer vest", image: "/pieces/vest.jpg" },
-      { name: "Denim jacket", image: "/pieces/jacket.jpg" },
-      { name: "Blue jeans", image: "/pieces/jeans.jpg" },
-      { name: "White sneakers", image: "/pieces/sneakers.jpg" },
+      { name: "Red puffer vest", image: "/stores/uniqlo-vest.jpg", url: "https://www.uniqlo.com/us/en/products/E487348-000/00" },
+      { name: "Denim jacket", image: "/stores/uniqlo-denim.jpg", url: "https://www.uniqlo.com/us/en/products/E488726-000/00" },
+      { name: "Blue jeans", image: "/stores/uniqlo-jeans.jpg", url: "https://www.uniqlo.com/us/en/products/E488684-000/00" },
+      { name: "White sneakers", image: "/stores/nike-af1.png", url: "https://www.nike.com/t/air-force-1-07-mens-shoes-DZejrQoC" },
     ],
   },
 ];

@@ -50,12 +50,29 @@ function milesBetween(lat: number, lng: number, lat2: number, lng2: number) {
   return 3958.8 * 2 * Math.asin(Math.sqrt(a));
 }
 
-function imageFor(piece: string) {
+function storeLink(shopId: string, piece: string, fallback: string) {
   const name = piece.toLowerCase();
-  if (/sneaker|shoe/.test(name)) return "/pieces/sneakers.jpg";
-  if (/jean/.test(name)) return "/pieces/jeans.jpg";
-  if (/vest/.test(name)) return "/pieces/vest.jpg";
-  return "/pieces/jacket.jpg";
+  if (shopId === "uniqlo") {
+    if (/jean/.test(name)) return "https://www.uniqlo.com/us/en/products/E488684-000/00";
+    if (/jacket/.test(name)) return "https://www.uniqlo.com/us/en/products/E488726-000/00";
+    if (/vest/.test(name)) return "https://www.uniqlo.com/us/en/products/E487348-000/00";
+  }
+  if (shopId === "nike") return "https://www.nike.com/t/air-force-1-07-mens-shoes-DZejrQoC";
+  return fallback;
+}
+
+function storePhoto(shopId: string, piece: string) {
+  const name = piece.toLowerCase();
+  if (shopId === "uniqlo") {
+    if (/jean/.test(name)) return "/stores/uniqlo-jeans.jpg";
+    if (/jacket/.test(name)) return "/stores/uniqlo-denim.jpg";
+    if (/vest/.test(name)) return "/stores/uniqlo-vest.jpg";
+    return "/stores/uniqlo-denim.jpg";
+  }
+  if (shopId === "nike") return "/stores/nike-af1.png";
+  if (shopId === "buffalo") return "/stores/buffalo.jpg";
+  if (shopId === "amarcord") return "/stores/amarcord.jpg";
+  return "";
 }
 
 function wantsShoes(piece: string) {
@@ -80,13 +97,13 @@ export function clothesNear(lat: number, lng: number, pieces: string[]): NearbyC
     rows.push({
       id: `${shop.id}-${piece}`,
       piece,
-      image: imageFor(piece),
+      image: storePhoto(shop.id, piece),
       shop: shop.name,
       address: shop.address,
       miles: shop.miles,
       lat: shop.lat,
       lng: shop.lng,
-      url: shop.url,
+      url: storeLink(shop.id, piece, shop.url),
     });
   }
 
