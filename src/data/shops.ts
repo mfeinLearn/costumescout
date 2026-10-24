@@ -1,6 +1,7 @@
 export type NearbyCloth = {
   id: string;
   piece: string;
+  image: string;
   shop: string;
   address: string;
   miles: number;
@@ -47,6 +48,14 @@ function milesBetween(lat: number, lng: number, lat2: number, lng2: number) {
   return 3958.8 * 2 * Math.asin(Math.sqrt(a));
 }
 
+function imageFor(piece: string) {
+  const name = piece.toLowerCase();
+  if (/sneaker|shoe/.test(name)) return "/pieces/sneakers.jpg";
+  if (/jean/.test(name)) return "/pieces/jeans.jpg";
+  if (/vest/.test(name)) return "/pieces/vest.jpg";
+  return "/pieces/jacket.jpg";
+}
+
 function wantsShoes(piece: string) {
   return /sneaker|shoe|boot/.test(piece.toLowerCase());
 }
@@ -69,6 +78,7 @@ export function clothesNear(lat: number, lng: number, pieces: string[]): NearbyC
     rows.push({
       id: `${shop.id}-${piece}`,
       piece,
+      image: imageFor(piece),
       shop: shop.name,
       address: shop.address,
       miles: shop.miles,

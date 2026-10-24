@@ -377,19 +377,26 @@ export function CostumeScout() {
                   <ul className="mt-2 space-y-2">
                     {nearby.map((item) => (
                       <li key={item.id} className="rounded-xl border border-line bg-bg px-3 py-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <p className="font-medium">{item.piece}</p>
-                          <p className="shrink-0 text-sm font-medium text-primary">{item.miles.toFixed(1)} mi</p>
+                        <div className="flex items-start gap-3">
+                          <a href={item.image} target="_blank" rel="noreferrer" className="shrink-0">
+                            <img src={item.image} alt="" className="size-16 rounded-lg object-cover" />
+                          </a>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-3">
+                              <p className="font-medium">{item.piece}</p>
+                              <p className="shrink-0 text-sm font-medium text-primary">{item.miles.toFixed(1)} mi</p>
+                            </div>
+                            <a
+                              className="mt-1 block text-sm underline"
+                              href={`https://maps.google.com/?q=${item.lat},${item.lng}`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {item.shop}
+                            </a>
+                            <p className="text-sm text-muted">{item.address}. Stock is not confirmed.</p>
+                          </div>
                         </div>
-                        <a
-                          className="mt-1 block text-sm underline"
-                          href={`https://maps.google.com/?q=${item.lat},${item.lng}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {item.shop}
-                        </a>
-                        <p className="text-sm text-muted">{item.address}. Stock is not confirmed.</p>
                       </li>
                     ))}
                   </ul>
@@ -442,6 +449,13 @@ export function CostumeScout() {
                 <ul className="space-y-3">
                   {hits.map((hit) => (
                     <li key={hit.id} className="rounded-2xl border border-line bg-surface p-4">
+                      <div className="flex items-start gap-3">
+                        {nearby.find((item) => item.id === hit.id)?.image ? (
+                          <a href={nearby.find((item) => item.id === hit.id)!.image} target="_blank" rel="noreferrer" className="shrink-0">
+                            <img src={nearby.find((item) => item.id === hit.id)!.image} alt="" className="size-16 rounded-lg object-cover" />
+                          </a>
+                        ) : null}
+                        <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="flex items-center gap-2 font-medium">
@@ -478,6 +492,8 @@ export function CostumeScout() {
                       <p className="mt-2 text-sm text-muted">
                         {hit.sizes} · {hit.note}
                       </p>
+                      </div>
+                      </div>
                     </li>
                   ))}
                 </ul>
