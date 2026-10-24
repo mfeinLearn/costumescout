@@ -61,23 +61,62 @@ async function placeFromCoords(lat: number, lng: number) {
   return city || region || null;
 }
 
-async function pageImage(url: string) {
+function productImages(html: string) {
+  const found = new Set<string>();
+  const patterns = [
+    /property=["']og:image["']\s+content=["']([^"']+)["']/gi,
+    /content=["']([^"']+)["']\s+property=["']og:image["']/gi,
+    /property=["']twitter:image["']\s+content=["']([^"']+)["']/gi,
+    /"image"\s*:\s*"(https?:[^"]+)"/gi,
+  ];
+  for (const pattern of patterns) {
+    for (const match of html.matchAll(pattern)) {
+      const image = match[1]?.replace(/\\u0026/g, "&").replace(/\\\//g, "/");
+      if (!image?.startsWith("http")) continue;
+      if (/logo|icon|sprite|avatar|favicon|map|badge|placeholder|\.svg(\?|$)/i.test(image)) continue;
+      found.add(image);
+      if (found.size >= 2) return [...found];
+    }
+  }
+  return [...found];
+}
+
+async function pageImages(url: string) {
   try {
     const response = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0" },
       redirect: "follow",
       signal: AbortSignal.timeout(8000),
     });
-    if (!response.ok) return "";
-    const html = (await response.text()).slice(0, 120000);
-    const match =
-      html.match(/property=["']og:image["']\s+content=["']([^"']+)["']/i) ||
-      html.match(/content=["']([^"']+)["']\s+property=["']og:image["']/i);
-    const image = match?.[1] ?? "";
-    return image.startsWith("http") ? image : "";
+    if (!response.ok) return [];
+    const html = (await response.text()).slice(0, 160000);
+    return productImages(html);
   } catch {
-    return "";
+    return [];
   }
+}
+
+async function clothesIndexes(piece: string, images: string[]) {
+  if (images.length === 0) return [];
+  const text = await grok(
+    [
+      {
+        role: "user",
+        content: [
+          ...images.map((image) => ({ type: "input_image" as const, image_url: image, detail: "low" as const })),
+          {
+            type: "input_text" as const,
+            text: `Images are numbered from 0. Which ones are a photo of the clothing item "${piece}" — the garment itself, or a person wearing that garment? Reject logos, storefronts, maps, faces alone, and anything that is not clothes. JSON only: {"keep":[]}`,
+          },
+        ],
+      },
+    ],
+    undefined,
+    18000,
+  );
+  const parsed = parseJson(text);
+  if (!Array.isArray(parsed?.keep)) return [];
+  return parsed.keep.map(Number).filter((index) => index >= 0 && index < images.length);
 }
 
 async function exaPick(piece: string, place: string) {
@@ -85,29 +124,35 @@ async function exaPick(piece: string, place: string) {
   if (!key) return null;
   const { default: Exa } = await import("exa-js");
   const exa = new Exa(key);
-  const result = await exa.search(`${piece} for sale in stock near ${place}`, {
+  const result = await exa.search(`buy ${piece} clothing product page near ${place}`, {
     type: "auto",
     userLocation: "US",
     numResults: 4,
+    systemPrompt:
+      "Prefer a retailer product page for this garment. Skip news, maps, social posts, and store homepages.",
+    excludeDomains: [
+      "wikipedia.org",
+      "youtube.com",
+      "reddit.com",
+      "instagram.com",
+      "facebook.com",
+      "tiktok.com",
+      "pinterest.com",
+    ],
     contents: { highlights: true },
-    outputSchema: {
-      type: "object",
-      properties: {
-        store: { type: "string" },
-        url: { type: "string" },
-      },
-      required: ["store", "url"],
-    },
   });
-  const picked = result.output?.content as { store?: string; url?: string } | undefined;
-  const top = result.results?.[0];
-  const url = picked?.url && /^https?:\/\//.test(picked.url) ? picked.url : (top?.url ?? "");
-  if (!url) return null;
-  return {
-    url,
-    store: String(picked?.store || top?.title || "Store").slice(0, 80),
-    image: await pageImage(url),
-  };
+  const pages = (result.results ?? []).filter((item) => item.url).slice(0, 4);
+  const candidates: { url: string; store: string; image: string }[] = [];
+  for (const page of pages) {
+    const images = await pageImages(page.url);
+    if (images[0]) candidates.push({ url: page.url, store: String(page.title || "Store").slice(0, 80), image: images[0] });
+  }
+  const keep = await clothesIndexes(piece, candidates.map((item) => item.image)).catch(() => []);
+  const chosen = candidates[keep[0] ?? -1];
+  if (chosen) return chosen;
+  const fallback = pages[0];
+  if (!fallback?.url) return null;
+  return { url: fallback.url, store: String(fallback.title || "Store").slice(0, 80), image: "" };
 }
 
 async function whopCheckout(piece: string, storeUrl: string) {
@@ -166,7 +211,7 @@ export const classifyLook = createServerFn({ method: "POST" })
           { type: "input_image", image_url: data.image, detail: "high" },
           {
             type: "input_text",
-            text: 'Classify this picture. Return JSON only: {"title":"","actor":"","show":"","pieces":[]}. pieces is 1 to 5 visible clothing items, each a short phrase with color and garment, like "red puffer vest". If the person is an actor or a character, put their name in actor and the movie or show in show. If you are not sure, leave actor and show empty. Do not guess a celebrity.',
+            text: 'Classify this picture. Return JSON only: {"title":"","actor":"","show":"","pieces":[]}. pieces is 1 to 5 wearable clothing items only, each a short phrase with color and garment, like "red puffer vest". Do not include faces, hair, props, weapons, or background objects. If the person is an actor or a character, put their name in actor and the movie or show in show. If you are not sure, leave actor and show empty. Do not guess a celebrity.',
           },
         ],
       },
