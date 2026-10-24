@@ -114,7 +114,7 @@ export function CostumeScout() {
   const [pieceHits, setPieceHits] = useState<Record<string, Hit[]>>({});
   const [place, setPlace] = useState<string | null>(null);
   const [nearby, setNearby] = useState<NearbyCloth[]>([]);
-  const [lookPieces, setLookPieces] = useState<{ name: string; image: string; url: string }[]>([]);
+  const [lookPieces, setLookPieces] = useState<{ name: string; image: string; url: string; shots: { image: string; url: string }[] }[]>([]);
   const photoDataRef = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [listings, setListings] = useState<Hit[]>([]);
@@ -191,7 +191,12 @@ export function CostumeScout() {
         setPlace(look.place);
         setLiveSearch(look.exa);
         setLookPieces(
-          look.pieces.map((piece) => ({ name: piece.piece, image: piece.image, url: piece.productUrl })),
+          look.pieces.map((piece) => ({
+            name: piece.piece,
+            image: piece.image,
+            url: piece.productUrl,
+            shots: piece.shots ?? [],
+          })),
         );
         agentNotes = look.notes;
         setLog(look.notes.map((text, index) => ({ id: `agent-${index}`, text })));
@@ -641,20 +646,20 @@ export function CostumeScout() {
 
                 {pieces.length > 0 ? (
                   <div>
-                    <p className="text-sm font-medium">The item</p>
+                    <p className="text-sm font-medium">Visual matches</p>
                     <ul className="mt-3 grid grid-cols-2 gap-3">
                       {pieces.map((piece) => (
                         <li key={piece.name} className="rounded-2xl border border-line bg-surface p-3">
-                          {piece.image ? (
-                            <a href={piece.url || undefined} target="_blank" rel="noreferrer">
-                              <img
-                                src={piece.image}
-                                alt=""
-                                className="aspect-square w-full rounded-xl object-cover"
-                              />
-                            </a>
+                          {piece.shots.length > 0 ? (
+                            <div className="grid grid-cols-2 gap-2">
+                              {piece.shots.map((shot) => (
+                                <a key={shot.image} href={shot.url} target="_blank" rel="noreferrer">
+                                  <img src={shot.image} alt="" className="aspect-square w-full rounded-lg object-cover" />
+                                </a>
+                              ))}
+                            </div>
                           ) : (
-                            <p className="text-sm text-muted">No product photo on the page that came back.</p>
+                            <p className="text-sm text-muted">No photo matched this piece. A mismatch was not shown.</p>
                           )}
                           <p className="mt-2 text-sm font-medium">{piece.name}</p>
                           <ul className="mt-2 space-y-1.5">

@@ -9,6 +9,7 @@ export type NearbyCloth = {
   lng: number;
   url: string;
   productUrl: string;
+  shots?: { image: string; url: string }[];
 };
 
 type Shop = {

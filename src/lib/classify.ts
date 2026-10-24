@@ -148,47 +148,83 @@ async function sexAgent(image: string): Promise<Dept> {
   if (sex === "female") return "women";
   return "unknown";
 }
-  async function exaPick(piece: string, place: string, dept: Dept) {
+  type Shot = { url: string; store: string; image: string };
+
+async function exaShots(piece: string, place: string, dept: Dept): Promise<Shot[]> {
   const key = process.env.EXA_API_KEY?.trim();
-  if (!key) return null;
-  const { default: Exa } = await import("exa-js");
-  const exa = new Exa(key);
+  if (!key) return [];
   const label = dept === "men" ? "men's" : dept === "women" ? "women's" : "";
-  const result = await exa.search(`buy ${label} ${piece} clothing product page near ${place}`.replace(/\s+/g, " "), {
-    type: "auto",
-    userLocation: "US",
-    numResults: 4,
-    systemPrompt: `Prefer a retailer product page for this ${label} garment. Skip the other clothing department, news, maps, social posts, and store homepages.`.replace(/\s+/g, " "),
-    excludeDomains: [
-      "wikipedia.org",
-      "youtube.com",
-      "reddit.com",
-      "instagram.com",
-      "facebook.com",
-      "tiktok.com",
-      "pinterest.com",
-    ],
-    contents: { highlights: true },
+  const response = await fetch("https://api.exa.ai/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      query: `buy ${label} ${piece} clothing product photo near ${place}`.replace(/\s+/g, " "),
+      type: "auto",
+      numResults: 6,
+      userLocation: "US",
+      excludeDomains: [
+        "wikipedia.org",
+        "youtube.com",
+        "reddit.com",
+        "instagram.com",
+        "facebook.com",
+        "tiktok.com",
+        "pinterest.com",
+      ],
+      contents: { extras: { imageLinks: 2 } },
+    }),
+    signal: AbortSignal.timeout(15000),
   });
-  const pages = (result.results ?? [])
-    .filter((item) => item.url)
-    .filter((item) => {
-      if (dept === "unknown") return true;
+  if (!response.ok) return [];
+  const body = (await response.json()) as {
+    results?: { url?: string; title?: string; image?: string; extras?: { imageLinks?: string[] } }[];
+  };
+  const shots: Shot[] = [];
+  for (const item of body.results ?? []) {
+    if (!item.url) continue;
+    if (dept !== "unknown") {
       const found = pageDept(`${item.title ?? ""} ${item.url}`);
-      return found === "either" || found === dept;
-    })
-    .slice(0, 4);
-  const candidates: { url: string; store: string; image: string }[] = [];
-  for (const page of pages) {
-    const images = await pageImages(page.url);
-    if (images[0]) candidates.push({ url: page.url, store: String(page.title || "Store").slice(0, 80), image: images[0] });
+      if (found !== "either" && found !== dept) continue;
+    }
+    const links = [...(item.extras?.imageLinks ?? []), item.image ?? ""];
+    const image = links.find((link) => /^https?:/.test(link) && !/logo|icon|sprite|avatar|favicon|\.svg(\?|$)/i.test(link));
+    if (!image) continue;
+    shots.push({ url: item.url, store: String(item.title || "Store").slice(0, 80), image });
+    if (shots.length >= 3) break;
   }
-  const keep = await clothesIndexes(piece, candidates.map((item) => item.image)).catch(() => []);
-  const chosen = candidates[keep[0] ?? -1];
-  if (chosen) return chosen;
-  const fallback = pages[0];
-  if (!fallback?.url) return null;
-  return { url: fallback.url, store: String(fallback.title || "Store").slice(0, 80), image: "" };
+  return shots;
+}
+
+async function matchPhoto(source: string, piece: string, shots: Shot[]) {
+  if (shots.length === 0) return [];
+  const text = await grok(
+    [
+      {
+        role: "user",
+        content: [
+          { type: "input_image" as const, image_url: source, detail: "high" as const },
+          ...shots.map((shot) => ({ type: "input_image" as const, image_url: shot.image, detail: "low" as const })),
+          {
+            type: "input_text" as const,
+            text: `The first image is the uploaded costume. The later images are numbered from 0. Keep a later image only if it shows the same garment and the same color as the "${piece}" in the costume, the way an image search keeps a visual match. Reject a different color, a different garment, logos, and storefronts. JSON only: {"keep":[]}`,
+          },
+        ],
+      },
+    ],
+    undefined,
+    20000,
+  );
+  const parsed = parseJson(text);
+  if (!Array.isArray(parsed?.keep)) return [];
+  return parsed.keep
+    .map(Number)
+    .filter((index) => index >= 0 && index < shots.length)
+    .map((index) => shots[index]);
+}
+
+async function exaPick(source: string, piece: string, place: string, dept: Dept) {
+  const shots = await exaShots(piece, place, dept);
+  return matchPhoto(source, piece, shots).catch(() => [] as Shot[]);
 }
 
 async function characterAgent(image: string) {
@@ -349,12 +385,14 @@ export const classifyLook = createServerFn({ method: "POST" })
         : "Brooklyn, New York";
     const listings = await Promise.all(
       look.pieces.map(async (piece) => {
-        const listing = await exaPick(piece, place, dept).catch(() => null);
+        const matches = await exaPick(data.image, piece, place, dept).catch(() => []);
+        const listing = matches[0];
         return {
           piece,
           url: listing?.url ?? "",
           store: listing?.store ?? "",
           image: listing?.image ?? "",
+          shots: matches.map((shot) => ({ image: shot.image, url: shot.url })),
         };
       }),
     );
@@ -380,6 +418,7 @@ export const classifyLook = createServerFn({ method: "POST" })
         lng,
         url: close ? listing.url : "",
         productUrl: close ? listing.url : "",
+        shots: close ? listing.shots : [],
       } satisfies NearbyCloth;
     });
 
@@ -390,6 +429,7 @@ export const classifyLook = createServerFn({ method: "POST" })
       `Agent 4, near ${place}: ${found.filter((item) => item.shop !== "Not near you" && item.url).length} of ${found.length} are close.`,
       `Agent 5, live link: ${liveFlags.filter(Boolean).length} of ${listings.length} pages loaded. 404s were dropped.`,
       `Agent 6, sex: ${dept === "men" ? "male" : dept === "women" ? "female" : "not clear"}. ${dept === "unknown" ? "No clothing filter." : "Other department dropped."}`,
+      `Image search: ${found.reduce((sum, item) => sum + (item.shots?.length ?? 0), 0)} photos matched the upload. Others were dropped.`,
     ];
 
     return {
