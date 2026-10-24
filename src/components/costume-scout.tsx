@@ -38,6 +38,17 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, reduce ? 40 : ms));
 }
 
+function locate(): Promise<{ lat: number; lng: number } | null> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => resolve({ lat: position.coords.latitude, lng: position.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 },
+    );
+  });
+}
+
 function stockLabel(stock: Stock) {
   if (stock === "in") return "In stock";
   if (stock === "low") return "Limited";
@@ -69,6 +80,8 @@ export function CostumeScout() {
   const [verifiedId, setVerifiedId] = useState<string | null>(null);
   const [teracNote, setTeracNote] = useState<string | null>(null);
   const [liveSearch, setLiveSearch] = useState(false);
+  const [pieceHits, setPieceHits] = useState<Record<string, Hit[]>>({});
+  const [place, setPlace] = useState<string | null>(null);
   const [listings, setListings] = useState<Hit[]>([]);
   const [whopUrl, setWhopUrl] = useState("https://whop.com");
   const [checkout, setCheckout] = useState<"scout" | "verified" | null>(null);
@@ -95,8 +108,9 @@ export function CostumeScout() {
 
   const exaQuery = useMemo(() => {
     const name = costume?.title ?? (query.trim() || "halloween costume");
-    return `${name} costume in stock near Williamsburg Brooklyn Spirit Halloween Party City`;
-  }, [costume, query]);
+    const where = place ?? "your location";
+    return `${name} and its pieces near ${where}`;
+  }, [costume, query, place]);
 
   const pieces = useMemo(() => piecesFor(costume?.title ?? query), [costume, query]);
 
@@ -108,6 +122,7 @@ export function CostumeScout() {
     setTeracNote(null);
     setCheckout(null);
     setLiveSearch(false);
+    setPieceHits({});
     const lines: LogLine[] = [];
     const push = async (textLine: string, ms: number) => {
       lines.push({ id: `${lines.length}-${textLine}`, text: textLine });
@@ -121,15 +136,34 @@ export function CostumeScout() {
     );
     const found = null;
     const title = text;
-    await push(`Identified: ${title}.`, 280);
-    await push(`Exa query: ${title} costume near 300 Kent Ave, Brooklyn.`, 200);
-    const live = await searchStores({ data: { query: title } });
+    const garments = piecesFor(title);
+    await push(`Identified: ${title}.`, 200);
+    const spot = await locate();
+    await push(
+      spot
+        ? "Got the phone location. Searching clothes near there."
+        : "Location was blocked. Searching near New York City.",
+      200,
+    );
+    if (garments.length) {
+      await push(`Also looking for ${garments.map((piece) => piece.name.toLowerCase()).join(", ")}.`, 160);
+    }
+    const live = await searchStores({
+      data: {
+        query: title,
+        pieces: garments.map((piece) => piece.name),
+        lat: spot?.lat,
+        lng: spot?.lng,
+      },
+    });
+    setPlace(live.place);
     setLiveSearch(live.live);
+    setPieceHits(Object.fromEntries(live.pieces.map((piece) => [piece.name, piece.hits])));
     await push(
       live.live
-        ? `Exa returned ${live.hits.length} live listings.`
+        ? `Exa checked ${live.place}. ${live.hits.length} costume listings, ${live.pieces.reduce((sum, piece) => sum + piece.hits.length, 0)} clothing listings.`
         : "No Exa key on this server. Nothing invented in its place.",
-      280,
+      200,
     );
     const peers = relevantPeers(found, text, loadListings());
     const merged = [...live.hits, ...peers];
@@ -428,6 +462,22 @@ export function CostumeScout() {
                             className="aspect-square w-full rounded-xl object-cover"
                           />
                           <p className="mt-2 text-sm font-medium">{piece.name}</p>
+                          <ul className="mt-2 space-y-1.5">
+                            {(pieceHits[piece.name] ?? []).length === 0 ? (
+                              <li className="text-sm text-muted">
+                                {liveSearch ? `Nothing listed near ${place ?? "you"}.` : "Nearby search needs the Exa key."}
+                              </li>
+                            ) : (
+                              (pieceHits[piece.name] ?? []).map((hit) => (
+                                <li key={hit.id} className="text-sm">
+                                  <a href={hit.address} target="_blank" rel="noreferrer" className="underline">
+                                    {hit.name}
+                                  </a>
+                                  <span className="text-muted"> · {hit.area}</span>
+                                </li>
+                              ))
+                            )}
+                          </ul>
                         </li>
                       ))}
                     </ul>
