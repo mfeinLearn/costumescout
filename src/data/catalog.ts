@@ -25,3 +25,22 @@ export type Costume = {
 export const SCOUT_PRICE = 4;
 export const VERIFIED_PRICE = 7;
 export const LISTING_CUT = 0.12;
+
+export type Piece = { name: string; image: string };
+
+const LOOKS: { keys: string[]; pieces: Piece[] }[] = [
+  {
+    keys: ["mac fly", "macfly", "mac-fly", "marty", "mcfly", "mc fly"],
+    pieces: [
+      { name: "Red puffer vest", image: "/pieces/vest.jpg" },
+      { name: "Denim jacket", image: "/pieces/jacket.jpg" },
+      { name: "Blue jeans", image: "/pieces/jeans.jpg" },
+      { name: "White sneakers", image: "/pieces/sneakers.jpg" },
+    ],
+  },
+];
+
+export function piecesFor(title: string): Piece[] {
+  const q = title.toLowerCase();
+  return LOOKS.find((look) => look.keys.some((key) => q.includes(key)))?.pieces ?? [];
+}

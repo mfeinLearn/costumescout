@@ -11,6 +11,7 @@ import {
   LISTING_CUT,
   SCOUT_PRICE,
   VERIFIED_PRICE,
+  piecesFor,
   type Costume,
   type Hit,
   type Stock,
@@ -96,6 +97,8 @@ export function CostumeScout() {
     const name = costume?.title ?? (query.trim() || "halloween costume");
     return `${name} costume in stock near Williamsburg Brooklyn Spirit Halloween Party City`;
   }, [costume, query]);
+
+  const pieces = useMemo(() => piecesFor(costume?.title ?? query), [costume, query]);
 
   async function runScout() {
     const text = query.trim() || photoName?.replace(/\.[a-z0-9]+$/i, "").replace(/[-_]/g, " ") || "";
@@ -412,6 +415,24 @@ export function CostumeScout() {
                 <p className="text-xs text-muted">
                   {liveSearch ? "Live Exa results." : "Exa did not run. No stand-in stores."} Query: {exaQuery}
                 </p>
+
+                {pieces.length > 0 ? (
+                  <div>
+                    <p className="text-sm font-medium">Pieces in the photo</p>
+                    <ul className="mt-3 grid grid-cols-2 gap-3">
+                      {pieces.map((piece) => (
+                        <li key={piece.name} className="rounded-2xl border border-line bg-surface p-3">
+                          <img
+                            src={piece.image}
+                            alt=""
+                            className="aspect-square w-full rounded-xl object-cover"
+                          />
+                          <p className="mt-2 text-sm font-medium">{piece.name}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
