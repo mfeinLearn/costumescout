@@ -501,7 +501,9 @@ export function CostumeScout() {
                             {item.url ? (
                               <p className="text-sm text-muted">{item.url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0]}</p>
                             ) : (
-                              <p className="text-sm text-muted">Add EXA_API_KEY to pick a store for this piece.</p>
+                              <p className="text-sm text-muted">
+                                {liveSearch ? "No live store page for this piece." : "Exa key is not on the server."}
+                              </p>
                             )}
                             <p className="text-sm text-muted">{item.address}. Stock is not confirmed.</p>
                           </div>

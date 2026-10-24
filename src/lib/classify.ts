@@ -175,7 +175,7 @@ async function exaShots(piece: string, place: string, dept: Dept): Promise<Shot[
     }),
     signal: AbortSignal.timeout(15000),
   });
-  if (!response.ok) return [];
+  if (!response.ok) throw new Error(`Exa search failed (${response.status})`);
   const body = (await response.json()) as {
     results?: { url?: string; title?: string; image?: string; extras?: { imageLinks?: string[] } }[];
   };
@@ -188,22 +188,22 @@ async function exaShots(piece: string, place: string, dept: Dept): Promise<Shot[
     }
     const links = [...(item.extras?.imageLinks ?? []), item.image ?? ""];
     const image = links.find((link) => /^https?:/.test(link) && !/logo|icon|sprite|avatar|favicon|\.svg(\?|$)/i.test(link));
-    if (!image) continue;
-    shots.push({ url: item.url, store: String(item.title || "Store").slice(0, 80), image });
+    shots.push({ url: item.url, store: String(item.title || "Store").slice(0, 80), image: image ?? "" });
     if (shots.length >= 3) break;
   }
   return shots;
 }
 
 async function matchPhoto(source: string, piece: string, shots: Shot[]) {
-  if (shots.length === 0) return [];
+  const pictured = shots.filter((shot) => shot.image);
+  if (pictured.length === 0) return [];
   const text = await grok(
     [
       {
         role: "user",
         content: [
           { type: "input_image" as const, image_url: source, detail: "high" as const },
-          ...shots.map((shot) => ({ type: "input_image" as const, image_url: shot.image, detail: "low" as const })),
+          ...pictured.map((shot) => ({ type: "input_image" as const, image_url: shot.image, detail: "low" as const })),
           {
             type: "input_text" as const,
             text: `The first image is the uploaded costume. The later images are numbered from 0. Keep a later image only if it shows the same garment and the same color as the "${piece}" in the costume, the way an image search keeps a visual match. Reject a different color, a different garment, logos, and storefronts. JSON only: {"keep":[]}`,
@@ -218,13 +218,16 @@ async function matchPhoto(source: string, piece: string, shots: Shot[]) {
   if (!Array.isArray(parsed?.keep)) return [];
   return parsed.keep
     .map(Number)
-    .filter((index) => index >= 0 && index < shots.length)
-    .map((index) => shots[index]);
+    .filter((index) => index >= 0 && index < pictured.length)
+    .map((index) => pictured[index]);
 }
 
 async function exaPick(source: string, piece: string, place: string, dept: Dept) {
   const shots = await exaShots(piece, place, dept);
-  return matchPhoto(source, piece, shots).catch(() => [] as Shot[]);
+  const matched = await matchPhoto(source, piece, shots).catch(() => [] as Shot[]);
+  if (matched.length > 0) return matched;
+  const page = shots[0];
+  return page ? [{ ...page, image: "" }] : [];
 }
 
 async function characterAgent(image: string) {
@@ -385,14 +388,19 @@ export const classifyLook = createServerFn({ method: "POST" })
         : "Brooklyn, New York";
     const listings = await Promise.all(
       look.pieces.map(async (piece) => {
-        const matches = await exaPick(data.image, piece, place, dept).catch(() => []);
+        let exaError = "";
+        const matches = await exaPick(data.image, piece, place, dept).catch((error: unknown) => {
+          exaError = error instanceof Error ? error.message : "Exa failed";
+          return [] as Shot[];
+        });
         const listing = matches[0];
         return {
           piece,
           url: listing?.url ?? "",
           store: listing?.store ?? "",
           image: listing?.image ?? "",
-          shots: matches.map((shot) => ({ image: shot.image, url: shot.url })),
+          shots: matches.filter((shot) => shot.image).map((shot) => ({ image: shot.image, url: shot.url })),
+          exaError,
         };
       }),
     );
@@ -411,14 +419,22 @@ export const classifyLook = createServerFn({ method: "POST" })
         id: `look-${index}-${listing.piece}`,
         piece: listing.piece,
         image: close ? listing.image : "",
-        shop: !listing.url ? "No store page" : !live ? "Link is a 404" : !verdict.near ? "Not near you" : listing.store,
+        shop: listing.exaError
+          ? listing.exaError
+          : !listing.url
+            ? "No store page"
+            : !live
+              ? "Link is a 404"
+              : !verdict.near
+                ? "Not near you"
+                : listing.store,
         address: close ? verdict.where || place : place,
         miles: close ? verdict.miles : 0,
         lat,
         lng,
-        url: close ? listing.url : "",
-        productUrl: close ? listing.url : "",
-        shots: close ? listing.shots : [],
+        url: live ? listing.url : "",
+        productUrl: live ? listing.url : "",
+        shots: listing.image && close ? listing.shots : [],
       } satisfies NearbyCloth;
     });
 
