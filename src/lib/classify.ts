@@ -80,27 +80,61 @@ async function pageImage(url: string) {
   }
 }
 
-async function findPiece(piece: string, place: string) {
-  const text = await grok(
-    [
-      {
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: `Search once for a current product page selling "${piece}" that ships to or is sold near ${place}. Reply with JSON only: {"title":"","url":"","store":""}. The url must be a page you opened. Do not invent a url.`,
-          },
-        ],
+async function exaPick(piece: string, place: string) {
+  const key = process.env.EXA_API_KEY?.trim();
+  if (!key) return null;
+  const { default: Exa } = await import("exa-js");
+  const exa = new Exa(key);
+  const result = await exa.search(`${piece} for sale in stock near ${place}`, {
+    type: "auto",
+    userLocation: "US",
+    numResults: 4,
+    contents: { highlights: true },
+    outputSchema: {
+      type: "object",
+      properties: {
+        store: { type: "string" },
+        url: { type: "string" },
       },
-    ],
-    [{ type: "web_search" }],
-    20000,
-  );
-  const parsed = parseJson(text);
-  const url = String(parsed?.url ?? "");
-  const store = String(parsed?.store || parsed?.title || "").slice(0, 80);
-  if (!/^https?:\/\//.test(url)) return { url: "", store, image: "" };
-  return { url, store, image: await pageImage(url) };
+      required: ["store", "url"],
+    },
+  });
+  const picked = result.output?.content as { store?: string; url?: string } | undefined;
+  const top = result.results?.[0];
+  const url = picked?.url && /^https?:\/\//.test(picked.url) ? picked.url : (top?.url ?? "");
+  if (!url) return null;
+  return {
+    url,
+    store: String(picked?.store || top?.title || "Store").slice(0, 80),
+    image: await pageImage(url),
+  };
+}
+
+async function whopCheckout(piece: string, storeUrl: string) {
+  const key = process.env.WHOP_API_KEY?.trim();
+  const company = process.env.WHOP_COMPANY_ID?.trim();
+  if (!key || !company || !storeUrl) return "";
+  const response = await fetch("https://api.whop.com/api/v1/checkout_configurations", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      currency: "usd",
+      plan: { initial_price: 4, plan_type: "one_time", company_id: company },
+      metadata: { piece, store: storeUrl },
+    }),
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!response.ok) return "";
+  const body = (await response.json()) as { plan?: { id?: string }; id?: string };
+  const planId = body.plan?.id || body.id;
+  return planId ? `https://whop.com/checkout/${planId}` : "";
+}
+
+async function findPiece(piece: string, place: string) {
+  const picked = await exaPick(piece, place);
+  if (!picked) return { url: "", store: "", image: "", checkout: "" };
+  const checkout = await whopCheckout(piece, picked.url);
+  return { ...picked, checkout };
 }
 
 export const classifyLook = createServerFn({ method: "POST" })
@@ -123,6 +157,7 @@ export const classifyLook = createServerFn({ method: "POST" })
     show: string;
     place: string;
     pieces: NearbyCloth[];
+    exa: boolean;
   }> => {
     const text = await grok([
       {
@@ -157,21 +192,34 @@ export const classifyLook = createServerFn({ method: "POST" })
     const found = await Promise.all(
       look.pieces.map(async (piece, index) => {
         const shop = shops[index] ?? shops[0];
-        const listing = await findPiece(piece, place).catch(() => ({ url: "", store: "", image: "" }));
+        const listing = await findPiece(piece, place).catch(() => ({
+          url: "",
+          store: "",
+          image: "",
+          checkout: "",
+        }));
+        const picked = Boolean(listing.url);
         return {
           id: `look-${index}-${piece}`,
           piece,
           image: listing.image,
-          shop: listing.store || shop?.shop || "Listing",
-          address: shop?.address || place,
-          miles: shop?.miles ?? 0,
+          shop: picked ? listing.store : "Exa did not pick a store",
+          address: picked ? place : shop?.address || place,
+          miles: picked ? 0 : shop?.miles ?? 0,
           lat: shop?.lat ?? lat,
           lng: shop?.lng ?? lng,
-          url: shop?.url || listing.url || "https://www.google.com/search?q=" + encodeURIComponent(`${piece} near ${place}`),
-          productUrl: listing.url || shop?.url || "",
+          url: listing.url || shop?.url || "",
+          productUrl: listing.checkout || listing.url || "",
         } satisfies NearbyCloth;
       }),
     );
 
-    return { title: look.title, actor: look.actor, show: look.show, place, pieces: found };
+    return {
+      title: look.title,
+      actor: look.actor,
+      show: look.show,
+      place,
+      pieces: found,
+      exa: Boolean(process.env.EXA_API_KEY?.trim()),
+    };
   });

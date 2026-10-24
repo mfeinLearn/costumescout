@@ -192,6 +192,7 @@ export function CostumeScout() {
         show = look.show;
         foundClothes = look.pieces;
         setPlace(look.place);
+        setLiveSearch(look.exa);
         setLookPieces(
           look.pieces.map((piece) => ({ name: piece.piece, image: piece.image, url: piece.productUrl })),
         );
@@ -453,30 +454,40 @@ export function CostumeScout() {
             <div ref={listRef} className="mt-4 scroll-mt-20">
               {nearby.length > 0 ? (
                 <>
-                  <p className="text-sm font-medium">Clothes near you</p>
+                  <p className="text-sm font-medium">Stores Exa matched</p>
                   <ul className="mt-2 space-y-2">
                     {nearby.map((item) => (
                       <li key={item.id} className="rounded-xl border border-line bg-bg px-3 py-3">
                         <div className="flex items-start gap-3">
                           {item.image ? (
-                            <a href={item.productUrl} target="_blank" rel="noreferrer" className="shrink-0">
+                            <a href={item.url || item.productUrl} target="_blank" rel="noreferrer" className="shrink-0">
                               <img src={item.image} alt="" className="size-16 rounded-lg object-cover" />
                             </a>
                           ) : null}
                           <div className="min-w-0 flex-1">
                             <div className="flex items-start justify-between gap-3">
                               <p className="font-medium">{item.piece}</p>
-                              <p className="shrink-0 text-sm font-medium text-primary">{item.miles.toFixed(1)} mi</p>
+                              <p className="shrink-0 text-sm font-medium text-primary">
+                                {item.miles > 0 ? `${item.miles.toFixed(1)} mi` : "Exa"}
+                              </p>
                             </div>
-                            <a
-                              className="mt-1 block text-sm underline"
-                              href={item.url}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              {item.shop}
-                            </a>
-                            <p className="text-sm text-muted">{item.url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0]}</p>
+                            {item.url ? (
+                              <a className="mt-1 block text-sm underline" href={item.url} target="_blank" rel="noreferrer">
+                                {item.shop}
+                              </a>
+                            ) : (
+                              <p className="mt-1 text-sm">{item.shop}</p>
+                            )}
+                            {item.productUrl.includes("whop.com") ? (
+                              <a className="mt-1 block text-sm underline" href={item.productUrl} target="_blank" rel="noreferrer">
+                                Pay on Whop
+                              </a>
+                            ) : null}
+                            {item.url ? (
+                              <p className="text-sm text-muted">{item.url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0]}</p>
+                            ) : (
+                              <p className="text-sm text-muted">Add EXA_API_KEY to pick a store for this piece.</p>
+                            )}
                             <p className="text-sm text-muted">{item.address}. Stock is not confirmed.</p>
                           </div>
                         </div>
