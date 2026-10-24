@@ -7,6 +7,7 @@ export type NearbyCloth = {
   miles: number;
   lat: number;
   lng: number;
+  url: string;
 };
 
 type Shop = {
@@ -18,22 +19,23 @@ type Shop = {
   carries: string;
   shoes: boolean;
   costume: boolean;
+  url: string;
 };
 
 // Coordinates checked against OpenStreetMap. Used only to sort by the phone's location.
 const SHOPS: Shop[] = [
-  { id: "beacons", name: "Beacon's Closet", address: "74 Guernsey St, Brooklyn", lat: 40.7236707, lng: -73.9525839, carries: "Secondhand vest and jacket", shoes: false, costume: false },
-  { id: "buffalo", name: "Buffalo Exchange", address: "504 Driggs Ave, Brooklyn", lat: 40.7183158, lng: -73.9552362, carries: "Secondhand jeans and jacket", shoes: false, costume: false },
-  { id: "amarcord", name: "Amarcord Vintage", address: "223 Bedford Ave, Brooklyn", lat: 40.7163655, lng: -73.9591388, carries: "Vintage jacket", shoes: false, costume: false },
-  { id: "monk", name: "Monk Vintage", address: "500 Driggs Ave, Brooklyn", lat: 40.7183403, lng: -73.9551992, carries: "Vintage clothes", shoes: false, costume: false },
-  { id: "hm", name: "H&M", address: "497 Fulton Mall, Brooklyn", lat: 40.6907449, lng: -73.985152, carries: "New jeans and jacket", shoes: false, costume: false },
-  { id: "uniqlo", name: "Uniqlo", address: "546 Broadway, Manhattan", lat: 40.7235022, lng: -73.998176, carries: "New jacket and jeans", shoes: false, costume: false },
-  { id: "zara", name: "Zara", address: "Broadway, Manhattan", lat: 40.7225116, lng: -73.9994791, carries: "New jacket", shoes: false, costume: false },
-  { id: "kith", name: "Kith", address: "337 Lafayette St, Manhattan", lat: 40.7260461, lng: -73.9943647, carries: "Sneakers", shoes: true, costume: false },
-  { id: "nike", name: "Nike Community Store", address: "21 Mercer St, Manhattan", lat: 40.7206891, lng: -74.0020439, carries: "Sneakers", shoes: true, costume: false },
-  { id: "footlocker", name: "Foot Locker", address: "1268 Fulton St, Brooklyn", lat: 40.6802095, lng: -73.9501081, carries: "Sneakers", shoes: true, costume: false },
-  { id: "spirit", name: "Spirit Halloween", address: "490 Fulton Mall, Brooklyn", lat: 40.6897009, lng: -73.9833081, carries: "Costume", shoes: false, costume: true },
-  { id: "goodwill", name: "Goodwill", address: "42 Bond St, Brooklyn", lat: 40.6885543, lng: -73.9840421, carries: "Secondhand clothes", shoes: false, costume: false },
+  { id: "beacons", name: "Beacon's Closet", address: "74 Guernsey St, Brooklyn", lat: 40.7236707, lng: -73.9525839, carries: "Secondhand vest and jacket", shoes: false, costume: false, url: "https://beaconscloset.com/pages/greenpoint" },
+  { id: "buffalo", name: "Buffalo Exchange", address: "504 Driggs Ave, Brooklyn", lat: 40.7183158, lng: -73.9552362, carries: "Secondhand jeans and jacket", shoes: false, costume: false, url: "https://buffaloexchange.com/location/williamsburg-new-york/" },
+  { id: "amarcord", name: "Amarcord Vintage", address: "223 Bedford Ave, Brooklyn", lat: 40.7163655, lng: -73.9591388, carries: "Vintage jacket", shoes: false, costume: false, url: "https://www.amarcordvintagefashion.com/" },
+  { id: "monk", name: "Monk Vintage", address: "500 Driggs Ave, Brooklyn", lat: 40.7183403, lng: -73.9551992, carries: "Vintage clothes", shoes: false, costume: false, url: "https://www.instagram.com/monkvintage/" },
+  { id: "hm", name: "H&M", address: "497 Fulton Mall, Brooklyn", lat: 40.6907449, lng: -73.985152, carries: "New jeans and jacket", shoes: false, costume: false, url: "https://www2.hm.com/en_us/men/products/jackets-coats/jackets.html" },
+  { id: "uniqlo", name: "Uniqlo", address: "546 Broadway, Manhattan", lat: 40.7235022, lng: -73.998176, carries: "New jacket and jeans", shoes: false, costume: false, url: "https://www.uniqlo.com/us/en/products/E487348-000/00" },
+  { id: "zara", name: "Zara", address: "Broadway, Manhattan", lat: 40.7225116, lng: -73.9994791, carries: "New jacket", shoes: false, costume: false, url: "https://www.zara.com/us/en/man-jackets-denim-l648.html" },
+  { id: "kith", name: "Kith", address: "337 Lafayette St, Manhattan", lat: 40.7260461, lng: -73.9943647, carries: "Sneakers", shoes: true, costume: false, url: "https://kith.com/pages/locations" },
+  { id: "nike", name: "Nike Community Store", address: "21 Mercer St, Manhattan", lat: 40.7206891, lng: -74.0020439, carries: "Sneakers", shoes: true, costume: false, url: "https://www.nike.com" },
+  { id: "footlocker", name: "Foot Locker", address: "1268 Fulton St, Brooklyn", lat: 40.6802095, lng: -73.9501081, carries: "Sneakers", shoes: true, costume: false, url: "https://www.footlocker.com" },
+  { id: "spirit", name: "Spirit Halloween", address: "490 Fulton Mall, Brooklyn", lat: 40.6897009, lng: -73.9833081, carries: "Costume", shoes: false, costume: true, url: "https://www.spirithalloween.com" },
+  { id: "goodwill", name: "Goodwill", address: "42 Bond St, Brooklyn", lat: 40.6885543, lng: -73.9840421, carries: "Secondhand clothes", shoes: false, costume: false, url: "https://www.goodwillnynj.org" },
 ];
 
 export const FALLBACK_SPOT = { lat: 40.7218, lng: -73.9645 };
@@ -84,6 +86,7 @@ export function clothesNear(lat: number, lng: number, pieces: string[]): NearbyC
       miles: shop.miles,
       lat: shop.lat,
       lng: shop.lng,
+      url: shop.url,
     });
   }
 

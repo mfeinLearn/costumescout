@@ -378,7 +378,7 @@ export function CostumeScout() {
                     {nearby.map((item) => (
                       <li key={item.id} className="rounded-xl border border-line bg-bg px-3 py-3">
                         <div className="flex items-start gap-3">
-                          <a href={item.image} target="_blank" rel="noreferrer" className="shrink-0">
+                          <a href={item.url} target="_blank" rel="noreferrer" className="shrink-0">
                             <img src={item.image} alt="" className="size-16 rounded-lg object-cover" />
                           </a>
                           <div className="min-w-0 flex-1">
@@ -388,12 +388,13 @@ export function CostumeScout() {
                             </div>
                             <a
                               className="mt-1 block text-sm underline"
-                              href={`https://maps.google.com/?q=${item.lat},${item.lng}`}
+                              href={item.url}
                               target="_blank"
                               rel="noreferrer"
                             >
                               {item.shop}
                             </a>
+                            <p className="text-sm text-muted">{item.url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0]}</p>
                             <p className="text-sm text-muted">{item.address}. Stock is not confirmed.</p>
                           </div>
                         </div>
@@ -451,7 +452,7 @@ export function CostumeScout() {
                     <li key={hit.id} className="rounded-2xl border border-line bg-surface p-4">
                       <div className="flex items-start gap-3">
                         {nearby.find((item) => item.id === hit.id)?.image ? (
-                          <a href={nearby.find((item) => item.id === hit.id)!.image} target="_blank" rel="noreferrer" className="shrink-0">
+                          <a href={nearby.find((item) => item.id === hit.id)!.url} target="_blank" rel="noreferrer" className="shrink-0">
                             <img src={nearby.find((item) => item.id === hit.id)!.image} alt="" className="size-16 rounded-lg object-cover" />
                           </a>
                         ) : null}
