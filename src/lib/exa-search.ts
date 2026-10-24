@@ -1,5 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import Exa from "exa-js";
 import type { Hit } from "@/data/catalog";
 
 function hostOf(url: string) {
@@ -23,6 +22,7 @@ export const searchStores = createServerFn({ method: "POST" })
     if (!key) return { live: false, hits: [] };
 
     try {
+      const { default: Exa } = await import("exa-js");
       const exa = new Exa(key);
       const result = await exa.search(
         `${data.query} halloween costume for sale or in stock near Williamsburg Brooklyn New York`,

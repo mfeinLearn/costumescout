@@ -19,7 +19,7 @@ import {
   type Stock,
 } from "@/data/catalog";
 import { loadListings, loadWhopUrl, saveListing, saveWhopUrl } from "@/lib/listings";
-import { searchStores } from "@/lib/exa.server";
+import { searchStores } from "@/lib/exa-search";
 
 type Phase = "idle" | "running" | "ready" | "verifying" | "verified";
 
