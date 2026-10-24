@@ -1,17 +1,17 @@
-import { SEED_LISTINGS, type Hit } from "@/data/catalog";
+import type { Hit } from "@/data/catalog";
 
 const KEY = "costumescout.listings.v1";
 const WHOP_KEY = "costumescout.whop.v1";
 
 export function loadListings(): Hit[] {
-  if (typeof window === "undefined") return SEED_LISTINGS;
+  if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return SEED_LISTINGS;
+    if (!raw) return [];
     const extra = JSON.parse(raw) as Hit[];
-    return [...extra, ...SEED_LISTINGS];
+    return Array.isArray(extra) ? extra : [];
   } catch {
-    return SEED_LISTINGS;
+    return [];
   }
 }
 

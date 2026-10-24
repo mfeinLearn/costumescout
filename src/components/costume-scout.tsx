@@ -8,12 +8,9 @@ import {
   Upload,
 } from "lucide-react";
 import {
-  COSTUMES,
   LISTING_CUT,
   SCOUT_PRICE,
   VERIFIED_PRICE,
-  genericHits,
-  matchCostume,
   type Costume,
   type Hit,
   type Stock,
@@ -60,59 +57,16 @@ function relevantPeers(costume: Costume | null, query: string, peers: Hit[]) {
   });
 }
 
-const SAMPLE = COSTUMES.find((item) => item.id === "gothic") ?? COSTUMES[0];
-
-const SAMPLE_PEER: Hit = {
-  id: "peer-sample-collar",
-  kind: "peer",
-  name: "Black dress + white collar",
-  area: "Williamsburg",
-  address: "Pickup at Domino Park",
-  miles: 0.4,
-  price: 22,
-  sizes: "S",
-  stock: "in",
-  note: "Worn to one party. Collar included. Seller: Noah.",
-};
-
-const SAMPLE_HITS: Hit[] = [SAMPLE_PEER, ...SAMPLE.hits.map((hit) =>
-  hit.id === "g-ricky"
-    ? {
-        ...hit,
-        note: "Expert confirmed in stock at 64 dollars. Sizes: XS–L. Two smalls on the rack.",
-      }
-    : hit,
-)].sort((a, b) => a.miles - b.miles);
-
-const SAMPLE_LOG: LogLine[] = [
-  { id: "s1", text: "Reading the request." },
-  { id: "s2", text: "Photo attached. Identifying from the name you gave plus the file." },
-  { id: "s3", text: "Identified: Gothic schoolgirl." },
-  { id: "s4", text: "Exa query: Gothic schoolgirl costume near 300 Kent Ave, Brooklyn." },
-  { id: "s5", text: "Matched 3 stores and 1 peer listing." },
-  { id: "s6", text: "Paid verification. Routing a Terac task." },
-  { id: "s7", text: "Terac: call Ricky’s NYC at 88 E 7th St. Confirm “Gothic schoolgirl” — sizes, price, still on the floor." },
-  { id: "s8", text: "Expert confirmed in stock at 64 dollars. Sizes: XS–L." },
-];
-
-const SAMPLE_REVIEWS = [
-  { name: "Amina", where: "Ricky’s NYC", line: "Small fit. Collar was on the hanger, not in a bin. Worth the trip from Kent Ave." },
-  { name: "Leo", where: "Spirit, Atlantic Terminal", line: "Site said limited. Floor only had XL. Don’t trust the page without a verify." },
-  { name: "Priya", where: "Peer · Domino Park", line: "Noah’s dress was clean. Paid $22 cash. Faster than any store." },
-];
-
 export function CostumeScout() {
-  const [query, setQuery] = useState("Gothic schoolgirl");
-  const [photoName, setPhotoName] = useState<string | null>("collar-dress.jpg");
-  const [photoUrl, setPhotoUrl] = useState<string | null>("/costumes/gothic.jpg");
-  const [phase, setPhase] = useState<Phase>("verified");
-  const [log, setLog] = useState<LogLine[]>(SAMPLE_LOG);
-  const [costume, setCostume] = useState<Costume | null>(SAMPLE);
-  const [hits, setHits] = useState<Hit[]>(SAMPLE_HITS);
-  const [verifiedId, setVerifiedId] = useState<string | null>("g-ricky");
-  const [teracNote, setTeracNote] = useState<string | null>(
-    "Expert confirmed in stock at Ricky’s NYC. 64 dollars, sizes XS–L. Two smalls still on the rack.",
-  );
+  const [query, setQuery] = useState("");
+  const [photoName, setPhotoName] = useState<string | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [log, setLog] = useState<LogLine[]>([]);
+  const [costume, setCostume] = useState<Costume | null>(null);
+  const [hits, setHits] = useState<Hit[]>([]);
+  const [verifiedId, setVerifiedId] = useState<string | null>(null);
+  const [teracNote, setTeracNote] = useState<string | null>(null);
   const [liveSearch, setLiveSearch] = useState(false);
   const [listings, setListings] = useState<Hit[]>([]);
   const [whopUrl, setWhopUrl] = useState("https://whop.com");
@@ -128,7 +82,7 @@ export function CostumeScout() {
 
   useEffect(() => {
     const loaded = loadListings();
-    setListings(loaded.some((hit) => hit.id === SAMPLE_PEER.id) ? loaded : [SAMPLE_PEER, ...loaded]);
+    setListings(loaded);
     setWhopUrl(loadWhopUrl());
   }, []);
 
@@ -162,38 +116,32 @@ export function CostumeScout() {
       photoUrl ? "Photo attached. Identifying from the name you gave plus the file." : "No photo. Identifying from the description.",
       520,
     );
-    const found = matchCostume(text);
-    const title = found?.title ?? text;
-    await push(
-      found ? `Identified: ${found.title}.` : `No exact catalog match. Treating “${title}” as the costume.`,
-      480,
-    );
+    const found = null;
+    const title = text;
+    await push(`Identified: ${title}.`, 280);
     await push(`Exa query: ${title} costume near 300 Kent Ave, Brooklyn.`, 200);
     const live = await searchStores({ data: { query: title } });
     setLiveSearch(live.live);
     await push(
       live.live
         ? `Exa returned ${live.hits.length} live listings.`
-        : "Exa key is not on this server yet. Using the Brooklyn index.",
+        : "No Exa key on this server. Nothing invented in its place.",
       280,
     );
     const peers = relevantPeers(found, text, loadListings());
-    const storeHits = found ? found.hits : genericHits(title);
-    const merged = [...live.hits, ...peers, ...storeHits];
+    const merged = [...live.hits, ...peers];
     await push(
-      `Matched ${storeHits.length} indexed stores, ${live.hits.length} live results, and ${peers.length} peer listings.`,
+      `Matched ${live.hits.length} live results and ${peers.length} peer listings.`,
       200,
     );
-    setCostume(
-      found ?? {
-        id: "custom",
-        title,
-        aliases: [],
-        blurb: "Custom request. The agent searched the Brooklyn index anyway.",
-        image: "/costumes/shop.jpg",
-        hits: storeHits,
-      },
-    );
+    setCostume({
+      id: "request",
+      title,
+      aliases: [],
+      blurb: photoUrl ? "Matched from the photo and the name you gave." : "Matched from the name you gave.",
+      image: photoUrl ?? "",
+      hits: merged,
+    });
     setHits(merged);
     setPhase("ready");
     await push("Scout ready. Verification stays off until someone pays for it.", 200);
@@ -209,20 +157,12 @@ export function CostumeScout() {
       setLog([...lines]);
       await wait(ms);
     };
-    await push("Paid verification. Routing a Terac task.", 500);
+    await push("Paid verification. Routing a Terac task.", 400);
     await push(
-      `Terac: call ${target.name} at ${target.address}. Confirm “${costume?.title}” — sizes, price, still on the floor.`,
-      900,
+      `Terac: check ${target.name}. Confirm “${costume?.title}” is actually there, with sizes and price.`,
+      500,
     );
-    const flipped = target.stock === "low" ? "out" : target.stock;
-    const note =
-      flipped === "out"
-        ? "Expert checked. The limited size is gone. Do not make the trip."
-        : `Expert confirmed ${stockLabel(target.stock).toLowerCase()} at ${target.price.toFixed(0)} dollars. Sizes: ${target.sizes}.`;
-    setHits((current) =>
-      current.map((hit) => (hit.id === target.id ? { ...hit, stock: flipped as Stock, note } : hit)),
-    );
-    setVerifiedId(target.id);
+    const note = "Task sent. No expert reply yet, so stock was not changed.";
     setTeracNote(note);
     setPhase("verified");
     await push(note, 200);
@@ -247,7 +187,7 @@ export function CostumeScout() {
       name: seller.title.trim(),
       area: seller.area.trim() || "Brooklyn",
       address: "Peer pickup",
-      miles: 1.1,
+      miles: 0,
       price: Number(seller.price) || 20,
       sizes: seller.sizes.trim() || "One size",
       stock: "in",
@@ -327,19 +267,6 @@ export function CostumeScout() {
               placeholder="Wednesday, ghost mask, vampire cape…"
               className="mt-2 w-full rounded-xl border border-line bg-bg px-3 py-3 text-base outline-none focus:border-primary"
             />
-            <div className="mt-3 flex flex-wrap gap-2">
-              {COSTUMES.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setQuery(item.title)}
-                  className="rounded-full border border-line bg-surface-2 px-3 py-1.5 text-sm text-fg hover:border-primary"
-                >
-                  {item.title}
-                </button>
-              ))}
-            </div>
-
             <label className="mt-5 flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line bg-bg px-3 py-4 text-center text-sm text-muted">
               {photoUrl ? (
                 <img src={photoUrl} alt="" className="h-24 w-24 rounded-lg object-cover" />
@@ -385,18 +312,15 @@ export function CostumeScout() {
               <div className="flex h-full min-h-80 flex-col justify-end rounded-2xl border border-line bg-surface p-5">
                 <p className="font-display text-2xl">Nothing matched yet.</p>
                 <p className="mt-2 max-w-md text-muted">
-                  Try a name. The index covers Spirit, Party City, Ricky’s, Halloween Adventure, and Target
-                  around Williamsburg — plus costumes people are selling tonight.
+                  Try a character name or a photo. Results come from Exa and from costumes people list here. Nothing is filled in ahead of time.
                 </p>
               </div>
             ) : (
               <div className="space-y-3">
                 <div className="flex gap-4 rounded-2xl border border-line bg-surface p-4">
-                  <img
-                    src={costume?.image ?? "/costumes/shop.jpg"}
-                    alt=""
-                    className="size-24 shrink-0 rounded-xl object-cover"
-                  />
+                  {photoUrl ? (
+                    <img src={photoUrl} alt="" className="size-24 shrink-0 rounded-xl object-cover" />
+                  ) : null}
                   <div>
                     <p className="text-xs font-medium tracking-wide text-primary">Identified</p>
                     <h2 className="font-display text-2xl leading-tight">{costume?.title}</h2>
@@ -404,6 +328,11 @@ export function CostumeScout() {
                   </div>
                 </div>
 
+                {hits.length === 0 ? (
+                  <p className="rounded-2xl border border-line bg-surface px-4 py-6 text-sm text-muted">
+                    No listings came back. Add the Exa key for live store pages, or list a costume yourself.
+                  </p>
+                ) : (
                 <ul className="space-y-3">
                   {hits.map((hit) => (
                     <li key={hit.id} className="rounded-2xl border border-line bg-surface p-4">
@@ -446,6 +375,7 @@ export function CostumeScout() {
                     </li>
                   ))}
                 </ul>
+                )}
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <button
@@ -480,23 +410,8 @@ export function CostumeScout() {
                 ) : null}
 
                 <p className="text-xs text-muted">
-                  {liveSearch ? "Live Exa results are listed first." : "Brooklyn index. Add EXA_API_KEY on the server for live search."}{" "}
-                  Query: {exaQuery}
+                  {liveSearch ? "Live Exa results." : "Exa did not run. No stand-in stores."} Query: {exaQuery}
                 </p>
-                <div className="rounded-2xl border border-line bg-surface p-4">
-                  <p className="text-xs font-medium tracking-wide text-primary">Sample reviews</p>
-                  <ul className="mt-3 space-y-3">
-                    {SAMPLE_REVIEWS.map((review) => (
-                      <li key={review.name}>
-                        <p className="text-sm font-medium">
-                          {review.name}
-                          <span className="font-normal text-muted"> · {review.where}</span>
-                        </p>
-                        <p className="text-sm text-muted">{review.line}</p>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
               </div>
             )}
           </div>
