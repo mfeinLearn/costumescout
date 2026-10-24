@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
   MapPin,
@@ -18,6 +18,7 @@ import {
 } from "@/data/catalog";
 import { loadListings, loadWhopUrl, saveListing, saveWhopUrl } from "@/lib/listings";
 import { searchStores } from "@/lib/exa-search";
+import { FALLBACK_SPOT, clothesNear, type NearbyCloth } from "@/data/shops";
 
 type Phase = "idle" | "running" | "ready" | "verifying" | "verified";
 
@@ -82,6 +83,8 @@ export function CostumeScout() {
   const [liveSearch, setLiveSearch] = useState(false);
   const [pieceHits, setPieceHits] = useState<Record<string, Hit[]>>({});
   const [place, setPlace] = useState<string | null>(null);
+  const [nearby, setNearby] = useState<NearbyCloth[]>([]);
+  const listRef = useRef<HTMLDivElement>(null);
   const [listings, setListings] = useState<Hit[]>([]);
   const [whopUrl, setWhopUrl] = useState("https://whop.com");
   const [checkout, setCheckout] = useState<"scout" | "verified" | null>(null);
@@ -114,8 +117,17 @@ export function CostumeScout() {
 
   const pieces = useMemo(() => piecesFor(costume?.title ?? query), [costume, query]);
 
-  async function runScout() {
-    const text = query.trim() || photoName?.replace(/\.[a-z0-9]+$/i, "").replace(/[-_]/g, " ") || "";
+  useEffect(() => {
+    if (nearby.length === 0) return;
+    listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [nearby]);
+
+  async function runScout(override?: string) {
+    const spotPromise = locate();
+    const text =
+      (override ?? query).trim() ||
+      photoName?.replace(/\.[a-z0-9]+$/i, "").replace(/[-_]/g, " ") ||
+      "";
     if (!text) return;
     setPhase("running");
     setVerifiedId(null);
@@ -123,6 +135,28 @@ export function CostumeScout() {
     setCheckout(null);
     setLiveSearch(false);
     setPieceHits({});
+    const title = text;
+    const garments = piecesFor(title);
+    const spot = await spotPromise;
+    const here = spot ?? FALLBACK_SPOT;
+    const foundClothes = clothesNear(here.lat, here.lng, garments.map((piece) => piece.name));
+    setNearby(foundClothes);
+    setPlace(spot ? "your location" : "Whop HQ");
+    setHits(
+      foundClothes.map((item) => ({
+        id: item.id,
+        kind: "store" as const,
+        name: item.piece,
+        area: item.shop,
+        address: item.address,
+        miles: item.miles,
+        price: 0,
+        sizes: "At the shop",
+        stock: "in" as const,
+        note: "Nearby shop. Stock is not confirmed.",
+      })),
+    );
+    setPhase("ready");
     const lines: LogLine[] = [];
     const push = async (textLine: string, ms: number) => {
       lines.push({ id: `${lines.length}-${textLine}`, text: textLine });
@@ -135,19 +169,13 @@ export function CostumeScout() {
       520,
     );
     const found = null;
-    const title = text;
-    const garments = piecesFor(title);
-    await push(`Identified: ${title}.`, 200);
-    const spot = await locate();
+    await push(`Identified: ${title}.`, 80);
     await push(
       spot
-        ? "Got the phone location. Searching clothes near there."
-        : "Location was blocked. Searching near New York City.",
-      200,
+        ? `Found ${foundClothes.length} clothes within a few miles.`
+        : `Location was blocked. Showing clothes near Whop HQ instead.`,
+      80,
     );
-    if (garments.length) {
-      await push(`Also looking for ${garments.map((piece) => piece.name.toLowerCase()).join(", ")}.`, 160);
-    }
     const live = await searchStores({
       data: {
         query: title,
@@ -156,17 +184,32 @@ export function CostumeScout() {
         lng: spot?.lng,
       },
     });
-    setPlace(live.place);
     setLiveSearch(live.live);
+    if (live.live) setPlace(live.place);
     setPieceHits(Object.fromEntries(live.pieces.map((piece) => [piece.name, piece.hits])));
     await push(
       live.live
         ? `Exa checked ${live.place}. ${live.hits.length} costume listings, ${live.pieces.reduce((sum, piece) => sum + piece.hits.length, 0)} clothing listings.`
-        : "No Exa key on this server. Nothing invented in its place.",
+        : `Nearby shops are listed. Web search did not run.`,
       200,
     );
     const peers = relevantPeers(found, text, loadListings());
-    const merged = [...live.hits, ...peers];
+    const merged = [
+      ...foundClothes.map((item) => ({
+        id: item.id,
+        kind: "store" as const,
+        name: item.piece,
+        area: item.shop,
+        address: item.address,
+        miles: item.miles,
+        price: 0,
+        sizes: "At the shop",
+        stock: "in" as const,
+        note: "Nearby shop. Stock is not confirmed.",
+      })),
+      ...live.hits,
+      ...peers,
+    ];
     await push(
       `Matched ${live.hits.length} live results and ${peers.length} peer listings.`,
       200,
@@ -181,7 +224,7 @@ export function CostumeScout() {
     });
     setHits(merged);
     setPhase("ready");
-    await push("Scout ready. Verification stays off until someone pays for it.", 200);
+    await push(`${foundClothes.length} nearby clothes, plus ${live.hits.length} web listings.`, 80);
   }
 
   async function verify() {
@@ -210,10 +253,9 @@ export function CostumeScout() {
     if (photoUrl?.startsWith("blob:")) URL.revokeObjectURL(photoUrl);
     setPhotoName(file.name);
     setPhotoUrl(URL.createObjectURL(file));
-    if (!query.trim()) {
-      const guess = file.name.replace(/\.[a-z0-9]+$/i, "").replace(/[-_]/g, " ");
-      setQuery(guess);
-    }
+    const nextName = query.trim() || file.name.replace(/\.[a-z0-9]+$/i, "").replace(/[-_]/g, " ");
+    if (!query.trim()) setQuery(nextName);
+    void runScout(nextName);
   }
 
   function publishListing() {
@@ -328,6 +370,33 @@ export function CostumeScout() {
               {phase === "running" ? "Scouting…" : "Run the scout"}
             </button>
 
+            <div ref={listRef} className="mt-4 scroll-mt-20">
+              {nearby.length > 0 ? (
+                <>
+                  <p className="text-sm font-medium">Clothes near you</p>
+                  <ul className="mt-2 space-y-2">
+                    {nearby.map((item) => (
+                      <li key={item.id} className="rounded-xl border border-line bg-bg px-3 py-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="font-medium">{item.piece}</p>
+                          <p className="shrink-0 text-sm font-medium text-primary">{item.miles.toFixed(1)} mi</p>
+                        </div>
+                        <a
+                          className="mt-1 block text-sm underline"
+                          href={`https://maps.google.com/?q=${item.lat},${item.lng}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {item.shop}
+                        </a>
+                        <p className="text-sm text-muted">{item.address}. Stock is not confirmed.</p>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+            </div>
+
             <div className="mt-5 rounded-xl bg-bg p-3">
               <p className="text-xs font-medium tracking-wide text-muted">Agent log</p>
               <ul className="mt-2 space-y-1.5 text-sm">
@@ -398,7 +467,7 @@ export function CostumeScout() {
                         </div>
                         <div className="text-right">
                           <p className="font-display text-xl">
-                            {hit.price > 0 ? `$${hit.price.toFixed(0)}` : "Web"}
+                            {hit.price > 0 ? `$${hit.price.toFixed(0)}` : hit.miles > 0 ? `${hit.miles.toFixed(1)} mi` : "Web"}
                           </p>
                           <p className={`text-sm font-medium ${stockClass(hit.stock)}`}>
                             {verifiedId === hit.id ? "Verified · " : ""}
