@@ -379,7 +379,7 @@ export function CostumeScout() {
                       <li key={item.id} className="rounded-xl border border-line bg-bg px-3 py-3">
                         <div className="flex items-start gap-3">
                           {item.image ? (
-                            <a href={item.url} target="_blank" rel="noreferrer" className="shrink-0">
+                            <a href={item.productUrl} target="_blank" rel="noreferrer" className="shrink-0">
                               <img src={item.image} alt="" className="size-16 rounded-lg object-cover" />
                             </a>
                           ) : null}
@@ -454,7 +454,7 @@ export function CostumeScout() {
                     <li key={hit.id} className="rounded-2xl border border-line bg-surface p-4">
                       <div className="flex items-start gap-3">
                         {nearby.find((item) => item.id === hit.id)?.image ? (
-                          <a href={nearby.find((item) => item.id === hit.id)!.url} target="_blank" rel="noreferrer" className="shrink-0">
+                          <a href={nearby.find((item) => item.id === hit.id)!.productUrl} target="_blank" rel="noreferrer" className="shrink-0">
                             <img src={nearby.find((item) => item.id === hit.id)!.image} alt="" className="size-16 rounded-lg object-cover" />
                           </a>
                         ) : null}
@@ -540,7 +540,7 @@ export function CostumeScout() {
 
                 {pieces.length > 0 ? (
                   <div>
-                    <p className="text-sm font-medium">Photos from the stores</p>
+                    <p className="text-sm font-medium">The item</p>
                     <ul className="mt-3 grid grid-cols-2 gap-3">
                       {pieces.map((piece) => (
                         <li key={piece.name} className="rounded-2xl border border-line bg-surface p-3">

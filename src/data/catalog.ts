@@ -32,10 +32,10 @@ const LOOKS: { keys: string[]; pieces: Piece[] }[] = [
   {
     keys: ["mac fly", "macfly", "mac-fly", "marty", "mcfly", "mc fly"],
     pieces: [
-      { name: "Red puffer vest", image: "/stores/uniqlo-vest.jpg", url: "https://www.uniqlo.com/us/en/products/E487348-000/00" },
-      { name: "Denim jacket", image: "/stores/uniqlo-denim.jpg", url: "https://www.uniqlo.com/us/en/products/E488726-000/00" },
-      { name: "Blue jeans", image: "/stores/uniqlo-jeans.jpg", url: "https://www.uniqlo.com/us/en/products/E488684-000/00" },
-      { name: "White sneakers", image: "/stores/nike-af1.png", url: "https://www.nike.com/t/air-force-1-07-mens-shoes-DZejrQoC" },
+      { name: "Red puffer vest", image: "/items/vest.jpg", url: "https://www.walmart.com/ip/Puffer-Vest-for-Men-Fashion-2024-Solid-Color-Stand-Collar-Unisex-Zip-Up-Pockets-Down-Jacket-Sleeveless-Waistcoat-5X-Large-Red/5107433246" },
+      { name: "Denim jacket", image: "/items/jacket.jpg", url: "https://www.walmart.com/ip/Wrangler-Men-s-Denim-Trucker-Jacket/1144122408" },
+      { name: "Blue jeans", image: "/items/jeans.jpg", url: "https://www.walmart.com/ip/George-Men-s-Straight-Fit-Jeans/841628089" },
+      { name: "White sneakers", image: "/items/sneakers.jpg", url: "https://www.walmart.com/ip/19386161626" },
     ],
   },
 ];
