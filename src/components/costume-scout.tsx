@@ -15,7 +15,7 @@ import {
   type Hit,
   type Stock,
 } from "@/data/catalog";
-import { loadListings, loadWhopUrl, saveListing, saveWhopUrl } from "@/lib/listings";
+import { loadListings, loadLooks, loadWhopUrl, saveListing, saveLook, saveWhopUrl, type PastLook } from "@/lib/listings";
 import { searchStores } from "@/lib/exa-search";
 import { classifyLook } from "@/lib/classify";
 import { FALLBACK_SPOT, clothesNear, type NearbyCloth } from "@/data/shops";
@@ -100,14 +100,6 @@ function stockClass(stock: Stock) {
   return "text-bad";
 }
 
-function relevantPeers(costume: Costume | null, query: string, peers: Hit[]) {
-  const blob = `${costume?.title ?? ""} ${costume?.aliases.join(" ") ?? ""} ${query}`.toLowerCase();
-  return peers.filter((peer) => {
-    const text = `${peer.name} ${peer.note}`.toLowerCase();
-    return blob.split(/\s+/).some((word) => word.length > 3 && text.includes(word));
-  });
-}
-
 export function CostumeScout() {
   const [query, setQuery] = useState("");
   const [photoName, setPhotoName] = useState<string | null>(null);
@@ -126,6 +118,7 @@ export function CostumeScout() {
   const photoDataRef = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [listings, setListings] = useState<Hit[]>([]);
+  const [past, setPast] = useState<PastLook[]>([]);
   const [whopUrl, setWhopUrl] = useState("https://whop.com");
   const [checkout, setCheckout] = useState<"scout" | "verified" | null>(null);
   const [listOpen, setListOpen] = useState(false);
@@ -141,6 +134,7 @@ export function CostumeScout() {
     const loaded = loadListings();
     setListings(loaded);
     setWhopUrl(loadWhopUrl());
+    setPast(loadLooks());
   }, []);
 
   useEffect(() => {
@@ -176,6 +170,8 @@ export function CostumeScout() {
     setLiveSearch(false);
     setPieceHits({});
     setLookPieces([]);
+    setNearby([]);
+    setHits([]);
     setLog([{ id: "start", text: "Classifying the clothes, then searching each piece near you." }]);
     const spot = await spotPromise;
     const here = spot ?? FALLBACK_SPOT;
@@ -240,7 +236,6 @@ export function CostumeScout() {
         : "No photo. Searching the description.",
       40,
     );
-    const found = null;
     await push(
       show ? `Actor: ${actor || "unknown"}. Show: ${show}.` : `Identified: ${title}.`,
       40,
@@ -266,7 +261,6 @@ export function CostumeScout() {
         : `Nearby shops are listed. Web search did not run.`,
       200,
     );
-    const peers = relevantPeers(found, text, loadListings());
     const merged = [
       ...foundClothes.map((item) => ({
         id: item.id,
@@ -279,14 +273,25 @@ export function CostumeScout() {
         sizes: "At the shop",
         stock: "in" as const,
         note: item.productUrl
-          ? "Classified from the upload, then searched near you."
-          : "Classified from the upload. No product page came back.",
+          ? "This search."
+          : "This search. No product page came back.",
       })),
       ...live.hits,
-      ...peers,
     ];
+    const lookId = `look-${Date.now()}`;
+    const saved = saveLook({
+      id: lookId,
+      title,
+      at: Date.now(),
+      pieces: foundClothes.map((item) => ({
+        name: item.piece,
+        shop: item.shop,
+        url: item.url,
+      })),
+    });
+    setPast(saved.filter((item) => item.id !== lookId));
     await push(
-      `Matched ${live.hits.length} live results and ${peers.length} peer listings.`,
+      `This search: ${merged.length} results.`,
       200,
     );
     setCostume({
@@ -758,6 +763,37 @@ export function CostumeScout() {
               <p className="mt-1 text-sm text-muted">{body}</p>
             </div>
           ))}
+        </section>
+
+        <section className="mt-12">
+          <h2 className="font-display text-3xl">Previously looked at</h2>
+          <p className="mt-1 text-muted">Earlier scouts stay here. The list above is only the search you just ran.</p>
+          {past.length === 0 ? (
+            <p className="mt-4 text-sm text-muted">None yet.</p>
+          ) : (
+            <ul className="mt-4 space-y-3">
+              {past.map((look) => (
+                <li key={look.id} className="rounded-2xl border border-line bg-surface p-4">
+                  <p className="font-medium">{look.title}</p>
+                  <p className="text-sm text-muted">{new Date(look.at).toLocaleString()}</p>
+                  <ul className="mt-2 space-y-1">
+                    {look.pieces.map((piece) => (
+                      <li key={`${look.id}-${piece.name}`} className="text-sm">
+                        {piece.url ? (
+                          <a href={piece.url} target="_blank" rel="noreferrer" className="underline">
+                            {piece.name}
+                          </a>
+                        ) : (
+                          piece.name
+                        )}
+                        <span className="text-muted"> · {piece.shop}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       </main>
 

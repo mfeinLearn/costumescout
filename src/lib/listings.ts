@@ -30,3 +30,30 @@ export function loadWhopUrl() {
 export function saveWhopUrl(url: string) {
   localStorage.setItem(WHOP_KEY, url);
 }
+
+const LOOKS_KEY = "costumescout.looks.v1";
+
+export type PastLook = {
+  id: string;
+  title: string;
+  at: number;
+  pieces: { name: string; shop: string; url: string }[];
+};
+
+export function loadLooks(): PastLook[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(LOOKS_KEY);
+    if (!raw) return [];
+    const looks = JSON.parse(raw) as PastLook[];
+    return Array.isArray(looks) ? looks : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveLook(look: PastLook) {
+  const next = [look, ...loadLooks().filter((item) => item.id !== look.id)].slice(0, 12);
+  localStorage.setItem(LOOKS_KEY, JSON.stringify(next));
+  return next;
+}
