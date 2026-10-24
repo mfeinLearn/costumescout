@@ -1,0 +1,645 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  Camera,
+  MapPin,
+  ShieldCheck,
+  ShoppingBag,
+  Store,
+  Upload,
+} from "lucide-react";
+import {
+  COSTUMES,
+  LISTING_CUT,
+  SCOUT_PRICE,
+  VERIFIED_PRICE,
+  genericHits,
+  matchCostume,
+  type Costume,
+  type Hit,
+  type Stock,
+} from "@/data/catalog";
+import { loadListings, loadWhopUrl, saveListing, saveWhopUrl } from "@/lib/listings";
+import { searchStores } from "@/lib/exa.server";
+
+type Phase = "idle" | "running" | "ready" | "verifying" | "verified";
+
+type LogLine = { id: string; text: string };
+
+const STEPS = [
+  { n: "01", title: "Upload", body: "Snap or type a character." },
+  { n: "02", title: "Identify", body: "The agent names the costume." },
+  { n: "03", title: "Search", body: "Nearby stores and the web." },
+  { n: "04", title: "Match", body: "New stock plus peer listings." },
+  { n: "05", title: "Transact", body: "Whop checkout. Agent keeps the cut." },
+];
+
+function wait(ms: number) {
+  const reduce =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return new Promise((resolve) => setTimeout(resolve, reduce ? 40 : ms));
+}
+
+function stockLabel(stock: Stock) {
+  if (stock === "in") return "In stock";
+  if (stock === "low") return "Limited";
+  return "Sold out";
+}
+
+function stockClass(stock: Stock) {
+  if (stock === "in") return "text-good";
+  if (stock === "low") return "text-warn";
+  return "text-bad";
+}
+
+function relevantPeers(costume: Costume | null, query: string, peers: Hit[]) {
+  const blob = `${costume?.title ?? ""} ${costume?.aliases.join(" ") ?? ""} ${query}`.toLowerCase();
+  return peers.filter((peer) => {
+    const text = `${peer.name} ${peer.note}`.toLowerCase();
+    return blob.split(/\s+/).some((word) => word.length > 3 && text.includes(word));
+  });
+}
+
+const SAMPLE = COSTUMES.find((item) => item.id === "gothic") ?? COSTUMES[0];
+
+const SAMPLE_PEER: Hit = {
+  id: "peer-sample-collar",
+  kind: "peer",
+  name: "Black dress + white collar",
+  area: "Williamsburg",
+  address: "Pickup at Domino Park",
+  miles: 0.4,
+  price: 22,
+  sizes: "S",
+  stock: "in",
+  note: "Worn to one party. Collar included. Seller: Noah.",
+};
+
+const SAMPLE_HITS: Hit[] = [SAMPLE_PEER, ...SAMPLE.hits.map((hit) =>
+  hit.id === "g-ricky"
+    ? {
+        ...hit,
+        note: "Expert confirmed in stock at 64 dollars. Sizes: XS–L. Two smalls on the rack.",
+      }
+    : hit,
+)].sort((a, b) => a.miles - b.miles);
+
+const SAMPLE_LOG: LogLine[] = [
+  { id: "s1", text: "Reading the request." },
+  { id: "s2", text: "Photo attached. Identifying from the name you gave plus the file." },
+  { id: "s3", text: "Identified: Gothic schoolgirl." },
+  { id: "s4", text: "Exa query: Gothic schoolgirl costume near 300 Kent Ave, Brooklyn." },
+  { id: "s5", text: "Matched 3 stores and 1 peer listing." },
+  { id: "s6", text: "Paid verification. Routing a Terac task." },
+  { id: "s7", text: "Terac: call Ricky’s NYC at 88 E 7th St. Confirm “Gothic schoolgirl” — sizes, price, still on the floor." },
+  { id: "s8", text: "Expert confirmed in stock at 64 dollars. Sizes: XS–L." },
+];
+
+const SAMPLE_REVIEWS = [
+  { name: "Amina", where: "Ricky’s NYC", line: "Small fit. Collar was on the hanger, not in a bin. Worth the trip from Kent Ave." },
+  { name: "Leo", where: "Spirit, Atlantic Terminal", line: "Site said limited. Floor only had XL. Don’t trust the page without a verify." },
+  { name: "Priya", where: "Peer · Domino Park", line: "Noah’s dress was clean. Paid $22 cash. Faster than any store." },
+];
+
+export function CostumeScout() {
+  const [query, setQuery] = useState("Gothic schoolgirl");
+  const [photoName, setPhotoName] = useState<string | null>("collar-dress.jpg");
+  const [photoUrl, setPhotoUrl] = useState<string | null>("/costumes/gothic.jpg");
+  const [phase, setPhase] = useState<Phase>("verified");
+  const [log, setLog] = useState<LogLine[]>(SAMPLE_LOG);
+  const [costume, setCostume] = useState<Costume | null>(SAMPLE);
+  const [hits, setHits] = useState<Hit[]>(SAMPLE_HITS);
+  const [verifiedId, setVerifiedId] = useState<string | null>("g-ricky");
+  const [teracNote, setTeracNote] = useState<string | null>(
+    "Expert confirmed in stock at Ricky’s NYC. 64 dollars, sizes XS–L. Two smalls still on the rack.",
+  );
+  const [liveSearch, setLiveSearch] = useState(false);
+  const [listings, setListings] = useState<Hit[]>([]);
+  const [whopUrl, setWhopUrl] = useState("https://whop.com");
+  const [checkout, setCheckout] = useState<"scout" | "verified" | null>(null);
+  const [listOpen, setListOpen] = useState(false);
+  const [seller, setSeller] = useState({
+    title: "",
+    area: "Williamsburg",
+    price: "25",
+    sizes: "M",
+    note: "",
+  });
+
+  useEffect(() => {
+    const loaded = loadListings();
+    setListings(loaded.some((hit) => hit.id === SAMPLE_PEER.id) ? loaded : [SAMPLE_PEER, ...loaded]);
+    setWhopUrl(loadWhopUrl());
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (photoUrl?.startsWith("blob:")) URL.revokeObjectURL(photoUrl);
+    };
+  }, [photoUrl]);
+
+  const exaQuery = useMemo(() => {
+    const name = costume?.title ?? (query.trim() || "halloween costume");
+    return `${name} costume in stock near Williamsburg Brooklyn Spirit Halloween Party City`;
+  }, [costume, query]);
+
+  async function runScout() {
+    const text = query.trim() || photoName?.replace(/\.[a-z0-9]+$/i, "").replace(/[-_]/g, " ") || "";
+    if (!text) return;
+    setPhase("running");
+    setVerifiedId(null);
+    setTeracNote(null);
+    setCheckout(null);
+    setLiveSearch(false);
+    const lines: LogLine[] = [];
+    const push = async (textLine: string, ms: number) => {
+      lines.push({ id: `${lines.length}-${textLine}`, text: textLine });
+      setLog([...lines]);
+      await wait(ms);
+    };
+    await push("Reading the request.", 420);
+    await push(
+      photoUrl ? "Photo attached. Identifying from the name you gave plus the file." : "No photo. Identifying from the description.",
+      520,
+    );
+    const found = matchCostume(text);
+    const title = found?.title ?? text;
+    await push(
+      found ? `Identified: ${found.title}.` : `No exact catalog match. Treating “${title}” as the costume.`,
+      480,
+    );
+    await push(`Exa query: ${title} costume near 300 Kent Ave, Brooklyn.`, 200);
+    const live = await searchStores({ data: { query: title } });
+    setLiveSearch(live.live);
+    await push(
+      live.live
+        ? `Exa returned ${live.hits.length} live listings.`
+        : "Exa key is not on this server yet. Using the Brooklyn index.",
+      280,
+    );
+    const peers = relevantPeers(found, text, loadListings());
+    const storeHits = found ? found.hits : genericHits(title);
+    const merged = [...live.hits, ...peers, ...storeHits];
+    await push(
+      `Matched ${storeHits.length} indexed stores, ${live.hits.length} live results, and ${peers.length} peer listings.`,
+      200,
+    );
+    setCostume(
+      found ?? {
+        id: "custom",
+        title,
+        aliases: [],
+        blurb: "Custom request. The agent searched the Brooklyn index anyway.",
+        image: "/costumes/shop.jpg",
+        hits: storeHits,
+      },
+    );
+    setHits(merged);
+    setPhase("ready");
+    await push("Scout ready. Verification stays off until someone pays for it.", 200);
+  }
+
+  async function verify() {
+    if (!hits.length || phase === "verifying") return;
+    setPhase("verifying");
+    const target = hits.find((hit) => hit.stock !== "out") ?? hits[0];
+    const lines = [...log];
+    const push = async (textLine: string, ms: number) => {
+      lines.push({ id: `${lines.length}-v`, text: textLine });
+      setLog([...lines]);
+      await wait(ms);
+    };
+    await push("Paid verification. Routing a Terac task.", 500);
+    await push(
+      `Terac: call ${target.name} at ${target.address}. Confirm “${costume?.title}” — sizes, price, still on the floor.`,
+      900,
+    );
+    const flipped = target.stock === "low" ? "out" : target.stock;
+    const note =
+      flipped === "out"
+        ? "Expert checked. The limited size is gone. Do not make the trip."
+        : `Expert confirmed ${stockLabel(target.stock).toLowerCase()} at ${target.price.toFixed(0)} dollars. Sizes: ${target.sizes}.`;
+    setHits((current) =>
+      current.map((hit) => (hit.id === target.id ? { ...hit, stock: flipped as Stock, note } : hit)),
+    );
+    setVerifiedId(target.id);
+    setTeracNote(note);
+    setPhase("verified");
+    await push(note, 200);
+  }
+
+  function onPhoto(file: File | null) {
+    if (!file) return;
+    if (photoUrl?.startsWith("blob:")) URL.revokeObjectURL(photoUrl);
+    setPhotoName(file.name);
+    setPhotoUrl(URL.createObjectURL(file));
+    if (!query.trim()) {
+      const guess = file.name.replace(/\.[a-z0-9]+$/i, "").replace(/[-_]/g, " ");
+      setQuery(guess);
+    }
+  }
+
+  function publishListing() {
+    if (!seller.title.trim()) return;
+    const hit: Hit = {
+      id: `peer-${Date.now()}`,
+      kind: "peer",
+      name: seller.title.trim(),
+      area: seller.area.trim() || "Brooklyn",
+      address: "Peer pickup",
+      miles: 1.1,
+      price: Number(seller.price) || 20,
+      sizes: seller.sizes.trim() || "One size",
+      stock: "in",
+      note: seller.note.trim() || "Listed during the hackathon.",
+    };
+    saveListing(hit);
+    setListings(loadListings());
+    setSeller({ title: "", area: "Williamsburg", price: "25", sizes: "M", note: "" });
+    setListOpen(false);
+  }
+
+  const busy = phase === "running" || phase === "verifying";
+
+  return (
+    <div className="min-h-screen bg-bg text-fg">
+      <header className="sticky top-0 z-20 border-b border-line bg-bg/90 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
+          <div className="flex items-center gap-3">
+            <span className="grid size-9 place-items-center rounded-full bg-primary text-primary-ink">
+              <ShoppingBag className="size-4" aria-hidden />
+            </span>
+            <div>
+              <p className="font-display text-lg leading-none tracking-tight">CostumeScout</p>
+              <p className="text-xs text-muted">Agent-run · Brooklyn tonight</p>
+            </div>
+          </div>
+          <p className="hidden text-sm text-muted sm:block">Halloween is in 7 days. Good sizes are already gone.</p>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-6xl px-4 pb-20 pt-8">
+        <section className="grid items-end gap-8 lg:grid-cols-[1.1fr_0.9fr]">
+          <div>
+            <p className="text-sm font-medium tracking-wide text-primary">Zero-human company</p>
+            <h1 className="mt-2 font-display text-4xl leading-[1.05] tracking-tight sm:text-6xl">
+              Upload a photo.
+              <br />
+              Find the costume nearby.
+            </h1>
+            <p className="mt-4 max-w-xl text-base text-muted sm:text-lg">
+              The agent identifies the character, checks stores around Whop HQ, and only calls a human
+              when you pay to verify the piece is actually on the rack.
+            </p>
+          </div>
+          <img
+            src="/costumes/shop.jpg"
+            alt="Dim costume shop with warm lights"
+            className="h-52 w-full rounded-2xl object-cover sm:h-64"
+          />
+        </section>
+
+        <ol className="mt-8 grid gap-3 sm:grid-cols-5">
+          {STEPS.map((step) => (
+            <li key={step.n} className="rounded-2xl border border-line bg-surface px-3 py-3">
+              <p className="font-display text-sm text-primary">{step.n}</p>
+              <p className="mt-1 font-medium">{step.title}</p>
+              <p className="text-sm text-muted">{step.body}</p>
+            </li>
+          ))}
+        </ol>
+
+        <section className="mt-8 grid gap-6 lg:grid-cols-[0.92fr_1.08fr]">
+          <form
+            className="rounded-2xl border border-line bg-surface p-4 sm:p-5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void runScout();
+            }}
+          >
+            <label className="block text-sm font-medium" htmlFor="character">
+              Character or costume
+            </label>
+            <input
+              id="character"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Wednesday, ghost mask, vampire cape…"
+              className="mt-2 w-full rounded-xl border border-line bg-bg px-3 py-3 text-base outline-none focus:border-primary"
+            />
+            <div className="mt-3 flex flex-wrap gap-2">
+              {COSTUMES.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setQuery(item.title)}
+                  className="rounded-full border border-line bg-surface-2 px-3 py-1.5 text-sm text-fg hover:border-primary"
+                >
+                  {item.title}
+                </button>
+              ))}
+            </div>
+
+            <label className="mt-5 flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line bg-bg px-3 py-4 text-center text-sm text-muted">
+              {photoUrl ? (
+                <img src={photoUrl} alt="" className="h-24 w-24 rounded-lg object-cover" />
+              ) : (
+                <Camera className="size-5 text-primary" aria-hidden />
+              )}
+              <span>{photoName ? photoName : "Or upload a photo of the character"}</span>
+              <input
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                onChange={(event) => onPhoto(event.target.files?.[0] ?? null)}
+              />
+            </label>
+
+            <button
+              type="submit"
+              disabled={busy || (!query.trim() && !photoName)}
+              className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-semibold text-primary-ink disabled:opacity-50"
+            >
+              <Upload className="size-4" aria-hidden />
+              {phase === "running" ? "Scouting…" : "Run the scout"}
+            </button>
+
+            <div className="mt-5 rounded-xl bg-bg p-3">
+              <p className="text-xs font-medium tracking-wide text-muted">Agent log</p>
+              <ul className="mt-2 space-y-1.5 text-sm">
+                {log.length === 0 ? (
+                  <li className="text-muted">Waiting for a costume. The company does not start itself.</li>
+                ) : (
+                  log.map((line) => (
+                    <li key={line.id} className="border-l-2 border-primary pl-2">
+                      {line.text}
+                    </li>
+                  ))
+                )}
+              </ul>
+            </div>
+          </form>
+
+          <div>
+            {phase === "idle" || phase === "running" ? (
+              <div className="flex h-full min-h-80 flex-col justify-end rounded-2xl border border-line bg-surface p-5">
+                <p className="font-display text-2xl">Nothing matched yet.</p>
+                <p className="mt-2 max-w-md text-muted">
+                  Try a name. The index covers Spirit, Party City, Ricky’s, Halloween Adventure, and Target
+                  around Williamsburg — plus costumes people are selling tonight.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex gap-4 rounded-2xl border border-line bg-surface p-4">
+                  <img
+                    src={costume?.image ?? "/costumes/shop.jpg"}
+                    alt=""
+                    className="size-24 shrink-0 rounded-xl object-cover"
+                  />
+                  <div>
+                    <p className="text-xs font-medium tracking-wide text-primary">Identified</p>
+                    <h2 className="font-display text-2xl leading-tight">{costume?.title}</h2>
+                    <p className="mt-1 text-sm text-muted">{costume?.blurb}</p>
+                  </div>
+                </div>
+
+                <ul className="space-y-3">
+                  {hits.map((hit) => (
+                    <li key={hit.id} className="rounded-2xl border border-line bg-surface p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="flex items-center gap-2 font-medium">
+                            {hit.kind === "peer" ? (
+                              <ShoppingBag className="size-4 text-primary" aria-hidden />
+                            ) : (
+                              <Store className="size-4 text-primary" aria-hidden />
+                            )}
+                            {hit.name}
+                          </p>
+                          <p className="mt-1 flex items-center gap-1 text-sm text-muted">
+                            <MapPin className="size-3.5" aria-hidden />
+                            {hit.miles > 0 ? (
+                              `${hit.area} · ${hit.miles.toFixed(1)} mi · ${hit.address}`
+                            ) : hit.address.startsWith("http") ? (
+                              <a href={hit.address} target="_blank" rel="noreferrer" className="underline">
+                                {hit.area}
+                              </a>
+                            ) : (
+                              `${hit.area} · ${hit.address}`
+                            )}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-display text-xl">
+                            {hit.price > 0 ? `$${hit.price.toFixed(0)}` : "Web"}
+                          </p>
+                          <p className={`text-sm font-medium ${stockClass(hit.stock)}`}>
+                            {verifiedId === hit.id ? "Verified · " : ""}
+                            {stockLabel(hit.stock)}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-sm text-muted">
+                        {hit.sizes} · {hit.note}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setCheckout("scout")}
+                    className="min-h-12 rounded-xl border border-line bg-surface-2 px-4 py-3 text-left"
+                  >
+                    <span className="block font-medium">Scout report · ${SCOUT_PRICE}</span>
+                    <span className="text-sm text-muted">This list, via Whop. No human.</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || phase === "verified"}
+                    onClick={() => {
+                      setCheckout("verified");
+                      if (phase !== "verified") void verify();
+                    }}
+                    className="min-h-12 rounded-xl bg-primary px-4 py-3 text-left text-primary-ink disabled:opacity-60"
+                  >
+                    <span className="flex items-center gap-2 font-medium">
+                      <ShieldCheck className="size-4" aria-hidden />
+                      Verified scout · ${VERIFIED_PRICE}
+                    </span>
+                    <span className="text-sm">
+                      {phase === "verified" ? "Terac already checked." : "A person confirms the rack."}
+                    </span>
+                  </button>
+                </div>
+
+                {teracNote ? (
+                  <p className="rounded-xl border border-line bg-bg px-3 py-3 text-sm">{teracNote}</p>
+                ) : null}
+
+                <p className="text-xs text-muted">
+                  {liveSearch ? "Live Exa results are listed first." : "Brooklyn index. Add EXA_API_KEY on the server for live search."}{" "}
+                  Query: {exaQuery}
+                </p>
+                <div className="rounded-2xl border border-line bg-surface p-4">
+                  <p className="text-xs font-medium tracking-wide text-primary">Sample reviews</p>
+                  <ul className="mt-3 space-y-3">
+                    {SAMPLE_REVIEWS.map((review) => (
+                      <li key={review.name}>
+                        <p className="text-sm font-medium">
+                          {review.name}
+                          <span className="font-normal text-muted"> · {review.where}</span>
+                        </p>
+                        <p className="text-sm text-muted">{review.line}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="mt-12 grid gap-6 lg:grid-cols-[1fr_1fr]">
+          <div>
+            <div className="flex items-end justify-between gap-3">
+              <div>
+                <h2 className="font-display text-3xl">Sell one tonight</h2>
+                <p className="mt-1 text-muted">
+                  List free. The agent takes {Math.round(LISTING_CUT * 100)}% only if it sells.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setListOpen((open) => !open)}
+                className="min-h-11 rounded-xl bg-fg px-4 py-2 text-sm font-semibold text-bg"
+              >
+                {listOpen ? "Close" : "List a costume"}
+              </button>
+            </div>
+            {listOpen ? (
+              <form
+                className="mt-4 grid gap-3 rounded-2xl border border-line bg-surface p-4"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  publishListing();
+                }}
+              >
+                <input
+                  required
+                  value={seller.title}
+                  onChange={(event) => setSeller({ ...seller, title: event.target.value })}
+                  placeholder="What are you selling?"
+                  className="rounded-xl border border-line bg-bg px-3 py-3 outline-none focus:border-primary"
+                />
+                <div className="grid grid-cols-3 gap-2">
+                  <input
+                    value={seller.area}
+                    onChange={(event) => setSeller({ ...seller, area: event.target.value })}
+                    placeholder="Neighborhood"
+                    className="rounded-xl border border-line bg-bg px-3 py-3 outline-none focus:border-primary"
+                  />
+                  <input
+                    value={seller.price}
+                    onChange={(event) => setSeller({ ...seller, price: event.target.value })}
+                    inputMode="decimal"
+                    placeholder="Price"
+                    className="rounded-xl border border-line bg-bg px-3 py-3 outline-none focus:border-primary"
+                  />
+                  <input
+                    value={seller.sizes}
+                    onChange={(event) => setSeller({ ...seller, sizes: event.target.value })}
+                    placeholder="Size"
+                    className="rounded-xl border border-line bg-bg px-3 py-3 outline-none focus:border-primary"
+                  />
+                </div>
+                <button type="submit" className="min-h-11 rounded-xl bg-primary font-semibold text-primary-ink">
+                  Publish listing
+                </button>
+              </form>
+            ) : null}
+          </div>
+          <ul className="space-y-2">
+            {listings.slice(0, 4).map((hit) => (
+              <li key={hit.id} className="flex items-center justify-between gap-3 rounded-xl border border-line px-3 py-3">
+                <div>
+                  <p className="font-medium">{hit.name}</p>
+                  <p className="text-sm text-muted">
+                    {hit.area} · {hit.sizes}
+                  </p>
+                </div>
+                <p className="font-display text-xl">${hit.price.toFixed(0)}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="mt-12 grid gap-3 sm:grid-cols-3">
+          {[
+            ["Exa", "Finds stores and pages. The agent writes the query."],
+            ["Whop", "Scout reports and the cut on a sale."],
+            ["Terac", "A person calls the store. Only on the paid verify."],
+          ].map(([title, body]) => (
+            <div key={title} className="rounded-2xl border border-line bg-surface p-4">
+              <p className="font-display text-xl">{title}</p>
+              <p className="mt-1 text-sm text-muted">{body}</p>
+            </div>
+          ))}
+        </section>
+      </main>
+
+      {checkout ? (
+        <div className="fixed inset-0 z-30 grid place-items-end bg-bg/70 p-4 sm:place-items-center">
+          <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-5">
+            <p className="text-sm text-muted">Whop checkout</p>
+            <h3 className="font-display text-2xl">
+              {checkout === "scout" ? "Scout report" : "Verified scout"} · $
+              {checkout === "scout" ? SCOUT_PRICE : VERIFIED_PRICE}
+            </h3>
+            <p className="mt-2 text-sm text-muted">
+              {checkout === "verified"
+                ? "After payment, the agent sends Terac to confirm stock at the closest store that still shows inventory."
+                : "Opens your Whop product. Paste the real checkout link once the product is live."}
+            </p>
+            <label className="mt-4 block text-sm" htmlFor="whop">
+              Checkout link
+            </label>
+            <input
+              id="whop"
+              value={whopUrl}
+              onChange={(event) => {
+                setWhopUrl(event.target.value);
+                saveWhopUrl(event.target.value);
+              }}
+              className="mt-1 w-full rounded-xl border border-line bg-bg px-3 py-3 text-sm outline-none focus:border-primary"
+            />
+            <div className="mt-4 flex gap-2">
+              <a
+                href={whopUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="flex min-h-11 flex-1 items-center justify-center rounded-xl bg-primary font-semibold text-primary-ink"
+                onClick={() => {
+                  if (checkout === "verified" && phase !== "verifying" && phase !== "verified") {
+                    void verify();
+                  }
+                }}
+              >
+                Open Whop
+              </a>
+              <button
+                type="button"
+                className="min-h-11 rounded-xl border border-line px-4"
+                onClick={() => setCheckout(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
