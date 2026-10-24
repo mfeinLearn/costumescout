@@ -11,13 +11,13 @@ import {
   LISTING_CUT,
   SCOUT_PRICE,
   VERIFIED_PRICE,
-  piecesFor,
   type Costume,
   type Hit,
   type Stock,
 } from "@/data/catalog";
 import { loadListings, loadWhopUrl, saveListing, saveWhopUrl } from "@/lib/listings";
 import { searchStores } from "@/lib/exa-search";
+import { classifyLook } from "@/lib/classify";
 import { FALLBACK_SPOT, clothesNear, type NearbyCloth } from "@/data/shops";
 
 type Phase = "idle" | "running" | "ready" | "verifying" | "verified";
@@ -47,6 +47,44 @@ function locate(): Promise<{ lat: number; lng: number } | null> {
       () => resolve(null),
       { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 },
     );
+  });
+}
+
+function fileToImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const draw = (source: CanvasImageSource, width: number, height: number) => {
+      const scale = Math.min(1, 768 / Math.max(width, height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(width * scale));
+      canvas.height = Math.max(1, Math.round(height * scale));
+      canvas.getContext("2d")?.drawImage(source, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", 0.72));
+    };
+    if (file.type.startsWith("video/")) {
+      const video = document.createElement("video");
+      video.preload = "auto";
+      video.muted = true;
+      video.playsInline = true;
+      video.src = url;
+      video.onloadeddata = () => {
+        video.currentTime = Math.min(0.5, (video.duration || 1) / 3);
+      };
+      video.onseeked = () => draw(video, video.videoWidth, video.videoHeight);
+      video.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Could not read that video."));
+      };
+      return;
+    }
+    const image = new Image();
+    image.onload = () => draw(image, image.naturalWidth, image.naturalHeight);
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read that image."));
+    };
+    image.src = url;
   });
 }
 
@@ -84,6 +122,8 @@ export function CostumeScout() {
   const [pieceHits, setPieceHits] = useState<Record<string, Hit[]>>({});
   const [place, setPlace] = useState<string | null>(null);
   const [nearby, setNearby] = useState<NearbyCloth[]>([]);
+  const [lookPieces, setLookPieces] = useState<{ name: string; image: string; url: string }[]>([]);
+  const photoDataRef = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [listings, setListings] = useState<Hit[]>([]);
   const [whopUrl, setWhopUrl] = useState("https://whop.com");
@@ -115,7 +155,7 @@ export function CostumeScout() {
     return `${name} and its pieces near ${where}`;
   }, [costume, query, place]);
 
-  const pieces = useMemo(() => piecesFor(costume?.title ?? query), [costume, query]);
+  const pieces = lookPieces;
 
   useEffect(() => {
     if (nearby.length === 0) return;
@@ -128,20 +168,47 @@ export function CostumeScout() {
       (override ?? query).trim() ||
       photoName?.replace(/\.[a-z0-9]+$/i, "").replace(/[-_]/g, " ") ||
       "";
-    if (!text) return;
+    if (!text && !photoDataRef.current) return;
     setPhase("running");
     setVerifiedId(null);
     setTeracNote(null);
     setCheckout(null);
     setLiveSearch(false);
     setPieceHits({});
-    const title = text;
-    const garments = piecesFor(title);
+    setLookPieces([]);
+    setLog([{ id: "start", text: "Classifying the clothes, then searching each piece near you." }]);
     const spot = await spotPromise;
     const here = spot ?? FALLBACK_SPOT;
-    const foundClothes = clothesNear(here.lat, here.lng, garments.map((piece) => piece.name));
+    let title = text || "Uploaded look";
+    let actor = "";
+    let show = "";
+    let foundClothes = clothesNear(here.lat, here.lng, []);
+    const image = photoDataRef.current;
+    try {
+      if (image) {
+        const look = await classifyLook({ data: { image, lat: spot?.lat, lng: spot?.lng } });
+        title = look.show ? `${look.actor || look.title} in ${look.show}` : look.title || title;
+        actor = look.actor;
+        show = look.show;
+        foundClothes = look.pieces;
+        setPlace(look.place);
+        setLookPieces(
+          look.pieces.map((piece) => ({ name: piece.piece, image: piece.image, url: piece.productUrl })),
+        );
+      } else {
+        setPlace(spot ? "your location" : "Whop HQ");
+      }
+    } catch (error) {
+      setPhase("ready");
+      setLog([
+        {
+          id: "fail",
+          text: error instanceof Error ? error.message : "Classification failed.",
+        },
+      ]);
+      return;
+    }
     setNearby(foundClothes);
-    setPlace(spot ? "your location" : "Whop HQ");
     setHits(
       foundClothes.map((item) => ({
         id: item.id,
@@ -153,7 +220,9 @@ export function CostumeScout() {
         price: 0,
         sizes: "At the shop",
         stock: "in" as const,
-        note: "Nearby shop. Stock is not confirmed.",
+        note: item.productUrl
+          ? "Classified from the upload, then searched near you."
+          : "Classified from the upload. No product page came back.",
       })),
     );
     setPhase("ready");
@@ -165,21 +234,24 @@ export function CostumeScout() {
     };
     await push("Reading the request.", 420);
     await push(
-      photoUrl ? "Photo attached. Identifying from the name you gave plus the file." : "No photo. Identifying from the description.",
-      520,
+      image
+        ? "Classifying the clothes in the photo, and the actor if there is one."
+        : "No photo. Searching the description.",
+      40,
     );
     const found = null;
-    await push(`Identified: ${title}.`, 80);
     await push(
-      spot
-        ? `Found ${foundClothes.length} clothes within a few miles.`
-        : `Location was blocked. Showing clothes near Whop HQ instead.`,
-      80,
+      show ? `Actor: ${actor || "unknown"}. Show: ${show}.` : `Identified: ${title}.`,
+      40,
+    );
+    await push(
+      `Searching ${foundClothes.length} pieces near ${spot ? "you" : "Whop HQ"}.`,
+      40,
     );
     const live = await searchStores({
       data: {
         query: title,
-        pieces: garments.map((piece) => piece.name),
+        pieces: foundClothes.map((piece) => piece.piece),
         lat: spot?.lat,
         lng: spot?.lng,
       },
@@ -205,7 +277,9 @@ export function CostumeScout() {
         price: 0,
         sizes: "At the shop",
         stock: "in" as const,
-        note: "Nearby shop. Stock is not confirmed.",
+        note: item.productUrl
+          ? "Classified from the upload, then searched near you."
+          : "Classified from the upload. No product page came back.",
       })),
       ...live.hits,
       ...peers,
@@ -218,7 +292,11 @@ export function CostumeScout() {
       id: "request",
       title,
       aliases: [],
-      blurb: photoUrl ? "Matched from the photo and the name you gave." : "Matched from the name you gave.",
+      blurb: show
+        ? `${actor ? `${actor} in ` : ""}${show}. Pieces were classified from the upload, then searched near ${place ?? "you"}.`
+        : image
+          ? "Pieces were classified from the upload, then searched near you."
+          : "Matched from the name you gave.",
       image: photoUrl ?? "",
       hits: merged,
     });
@@ -250,12 +328,14 @@ export function CostumeScout() {
 
   function onPhoto(file: File | null) {
     if (!file) return;
-    if (photoUrl?.startsWith("blob:")) URL.revokeObjectURL(photoUrl);
-    setPhotoName(file.name);
-    setPhotoUrl(URL.createObjectURL(file));
     const nextName = query.trim() || file.name.replace(/\.[a-z0-9]+$/i, "").replace(/[-_]/g, " ");
     if (!query.trim()) setQuery(nextName);
-    void runScout(nextName);
+    void fileToImage(file).then((data) => {
+      photoDataRef.current = data;
+      setPhotoName(file.name);
+      setPhotoUrl(data);
+      void runScout(nextName);
+    });
   }
 
   function publishListing() {
@@ -355,7 +435,7 @@ export function CostumeScout() {
               <span>{photoName ? photoName : "Or upload a photo of the character"}</span>
               <input
                 type="file"
-                accept="image/*"
+                accept="image/*,video/*"
                 className="sr-only"
                 onChange={(event) => onPhoto(event.target.files?.[0] ?? null)}
               />
@@ -544,13 +624,17 @@ export function CostumeScout() {
                     <ul className="mt-3 grid grid-cols-2 gap-3">
                       {pieces.map((piece) => (
                         <li key={piece.name} className="rounded-2xl border border-line bg-surface p-3">
-                          <a href={piece.url} target="_blank" rel="noreferrer">
-                            <img
-                              src={piece.image}
-                              alt=""
-                              className="aspect-square w-full rounded-xl object-cover"
-                            />
-                          </a>
+                          {piece.image ? (
+                            <a href={piece.url || undefined} target="_blank" rel="noreferrer">
+                              <img
+                                src={piece.image}
+                                alt=""
+                                className="aspect-square w-full rounded-xl object-cover"
+                              />
+                            </a>
+                          ) : (
+                            <p className="text-sm text-muted">No product photo on the page that came back.</p>
+                          )}
                           <p className="mt-2 text-sm font-medium">{piece.name}</p>
                           <ul className="mt-2 space-y-1.5">
                             {(pieceHits[piece.name] ?? []).length === 0 ? (

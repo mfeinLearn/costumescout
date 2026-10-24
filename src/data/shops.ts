@@ -51,43 +51,6 @@ function milesBetween(lat: number, lng: number, lat2: number, lng2: number) {
   return 3958.8 * 2 * Math.asin(Math.sqrt(a));
 }
 
-function storeLink(shopId: string, piece: string, fallback: string) {
-  const name = piece.toLowerCase();
-  if (shopId === "uniqlo") {
-    if (/jean/.test(name)) return "https://www.uniqlo.com/us/en/products/E488684-000/00";
-    if (/jacket/.test(name)) return "https://www.uniqlo.com/us/en/products/E488726-000/00";
-    if (/vest/.test(name)) return "https://www.uniqlo.com/us/en/products/E487348-000/00";
-  }
-  if (shopId === "nike") return "https://www.nike.com/t/air-force-1-07-mens-shoes-DZejrQoC";
-  return fallback;
-}
-
-function productShot(piece: string) {
-  const name = piece.toLowerCase();
-  if (/sneaker|shoe/.test(name)) {
-    return {
-      image: "/items/sneakers.jpg",
-      productUrl: "https://www.walmart.com/ip/19386161626",
-    };
-  }
-  if (/jean/.test(name) && !/jacket/.test(name)) {
-    return {
-      image: "/items/jeans.jpg",
-      productUrl: "https://www.walmart.com/ip/George-Men-s-Straight-Fit-Jeans/841628089",
-    };
-  }
-  if (/vest/.test(name)) {
-    return {
-      image: "/items/vest.jpg",
-      productUrl: "https://www.walmart.com/ip/Puffer-Vest-for-Men-Fashion-2024-Solid-Color-Stand-Collar-Unisex-Zip-Up-Pockets-Down-Jacket-Sleeveless-Waistcoat-5X-Large-Red/5107433246",
-    };
-  }
-  return {
-    image: "/items/jacket.jpg",
-    productUrl: "https://www.walmart.com/ip/Wrangler-Men-s-Denim-Trucker-Jacket/1144122408",
-  };
-}
-
 function wantsShoes(piece: string) {
   return /sneaker|shoe|boot/.test(piece.toLowerCase());
 }
@@ -107,18 +70,17 @@ export function clothesNear(lat: number, lng: number, pieces: string[]): NearbyC
       ranked.find((item) => (shoes ? item.shoes : true));
     if (!shop || used.has(shop.id)) continue;
     used.add(shop.id);
-    const shot = productShot(piece);
     rows.push({
       id: `${shop.id}-${piece}`,
       piece,
-      image: shot.image,
+      image: "",
       shop: shop.name,
       address: shop.address,
       miles: shop.miles,
       lat: shop.lat,
       lng: shop.lng,
-      url: storeLink(shop.id, piece, shop.url),
-      productUrl: shot.productUrl,
+      url: shop.url,
+      productUrl: "",
     });
   }
 
