@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { FALLBACK_SPOT, clothesNear, type NearbyCloth } from "@/data/shops";
+import { FALLBACK_SPOT, type NearbyCloth } from "@/data/shops";
 
 type Look = {
   title: string;
@@ -155,31 +155,97 @@ async function exaPick(piece: string, place: string) {
   return { url: fallback.url, store: String(fallback.title || "Store").slice(0, 80), image: "" };
 }
 
-async function whopCheckout(piece: string, storeUrl: string) {
-  const key = process.env.WHOP_API_KEY?.trim();
-  const company = process.env.WHOP_COMPANY_ID?.trim();
-  if (!key || !company || !storeUrl) return "";
-  const response = await fetch("https://api.whop.com/api/v1/checkout_configurations", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      currency: "usd",
-      plan: { initial_price: 4, plan_type: "one_time", company_id: company },
-      metadata: { piece, store: storeUrl },
-    }),
-    signal: AbortSignal.timeout(12000),
-  });
-  if (!response.ok) return "";
-  const body = (await response.json()) as { plan?: { id?: string }; id?: string };
-  const planId = body.plan?.id || body.id;
-  return planId ? `https://whop.com/checkout/${planId}` : "";
+async function characterAgent(image: string) {
+  const text = await grok([
+    {
+      role: "user",
+      content: [
+        { type: "input_image", image_url: image, detail: "high" },
+        {
+          type: "input_text",
+          text: 'You only identify the person. Return JSON only: {"actor":"","show":"","title":""}. If they are an actor or a character, name them and the movie or show. If you are not sure, leave actor and show empty. Do not guess. Do not list clothes.',
+        },
+      ],
+    },
+  ]);
+  const parsed = parseJson(text);
+  return {
+    title: String(parsed?.title || "Uploaded look").slice(0, 80),
+    actor: String(parsed?.actor ?? "").slice(0, 80),
+    show: String(parsed?.show ?? "").slice(0, 80),
+  };
 }
 
-async function findPiece(piece: string, place: string) {
-  const picked = await exaPick(piece, place);
-  if (!picked) return { url: "", store: "", image: "", checkout: "" };
-  const checkout = await whopCheckout(piece, picked.url);
-  return { ...picked, checkout };
+async function layersAgent(image: string) {
+  const text = await grok([
+    {
+      role: "user",
+      content: [
+        { type: "input_image", image_url: image, detail: "high" },
+        {
+          type: "input_text",
+          text: 'You only list clothing layers, outer to inner. Return JSON only: {"pieces":[]}. Each item is a short phrase with color and garment, like "red puffer vest". Wearable clothes only. No faces, hair, props, or background.',
+        },
+      ],
+    },
+  ]);
+  const parsed = parseJson(text);
+  return Array.isArray(parsed?.pieces)
+    ? parsed.pieces.map((piece) => String(piece).trim()).filter(Boolean).slice(0, 5)
+    : [];
+}
+
+async function clothesAgent(image: string, pieces: string[]) {
+  if (pieces.length === 0) return [];
+  const text = await grok([
+    {
+      role: "user",
+      content: [
+        { type: "input_image", image_url: image, detail: "high" },
+        {
+          type: "input_text",
+          text: `Another agent suggested these items: ${JSON.stringify(pieces)}. Keep only ones that are actual wearable clothes visible in the photo. Drop props, hair, faces, and guesses. JSON only: {"pieces":[]}`,
+        },
+      ],
+    },
+  ]);
+  const parsed = parseJson(text);
+  const kept = Array.isArray(parsed?.pieces)
+    ? parsed.pieces.map((piece) => String(piece).trim()).filter(Boolean).slice(0, 5)
+    : [];
+  return kept.length > 0 ? kept : pieces;
+}
+
+async function nearAgent(
+  place: string,
+  rows: { piece: string; store: string; url: string }[],
+) {
+  const text = await grok(
+    [
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: `The user is in ${place}. For each listing, decide if that garment is sold at a physical store within 25 miles. Online-only or far-away pages are not near. JSON only: {"rows":[{"piece":"","near":false,"miles":0,"where":""}]}\n${JSON.stringify(rows)}`,
+          },
+        ],
+      },
+    ],
+    [{ type: "web_search" }],
+    20000,
+  );
+  const parsed = parseJson(text);
+  const verdicts = Array.isArray(parsed?.rows) ? parsed.rows : [];
+  return rows.map((row, index) => {
+    const verdict = verdicts[index] as { near?: boolean; miles?: number; where?: string } | undefined;
+    const miles = Number(verdict?.miles);
+    return {
+      near: verdict?.near === true,
+      miles: Number.isFinite(miles) ? miles : 0,
+      where: String(verdict?.where ?? "").slice(0, 80),
+    };
+  });
 }
 
 export const classifyLook = createServerFn({ method: "POST" })
@@ -203,29 +269,21 @@ export const classifyLook = createServerFn({ method: "POST" })
     place: string;
     pieces: NearbyCloth[];
     exa: boolean;
+    notes: string[];
   }> => {
-    const text = await grok([
-      {
-        role: "user",
-        content: [
-          { type: "input_image", image_url: data.image, detail: "high" },
-          {
-            type: "input_text",
-            text: 'Classify this picture. Return JSON only: {"title":"","actor":"","show":"","pieces":[]}. pieces is 1 to 5 wearable clothing items only, each a short phrase with color and garment, like "red puffer vest". Do not include faces, hair, props, weapons, or background objects. If the person is an actor or a character, put their name in actor and the movie or show in show. If you are not sure, leave actor and show empty. Do not guess a celebrity.',
-          },
-        ],
-      },
+    const [character, layers] = await Promise.all([
+      characterAgent(data.image),
+      layersAgent(data.image),
     ]);
-    const parsed = parseJson(text);
+    const pieces = await clothesAgent(data.image, layers);
     const look: Look = {
-      title: String(parsed?.title || "Uploaded look").slice(0, 80),
-      actor: String(parsed?.actor ?? "").slice(0, 80),
-      show: String(parsed?.show ?? "").slice(0, 80),
-      pieces: Array.isArray(parsed?.pieces)
-        ? parsed.pieces.map((piece) => String(piece).trim()).filter(Boolean).slice(0, 5)
-        : [],
+      title: character.show
+        ? `${character.actor || character.title} in ${character.show}`
+        : character.title,
+      actor: character.actor,
+      show: character.show,
+      pieces: pieces.length > 0 ? pieces : [character.title],
     };
-    if (look.pieces.length === 0) look.pieces = [look.title];
 
     const lat = data.lat ?? FALLBACK_SPOT.lat;
     const lng = data.lng ?? FALLBACK_SPOT.lng;
@@ -233,31 +291,44 @@ export const classifyLook = createServerFn({ method: "POST" })
       data.lat != null && data.lng != null
         ? ((await placeFromCoords(data.lat, data.lng).catch(() => null)) ?? "New York City")
         : "Brooklyn, New York";
-    const shops = clothesNear(lat, lng, look.pieces);
-    const found = await Promise.all(
-      look.pieces.map(async (piece, index) => {
-        const shop = shops[index] ?? shops[0];
-        const listing = await findPiece(piece, place).catch(() => ({
-          url: "",
-          store: "",
-          image: "",
-          checkout: "",
-        }));
-        const picked = Boolean(listing.url);
+    const listings = await Promise.all(
+      look.pieces.map(async (piece) => {
+        const listing = await exaPick(piece, place).catch(() => null);
         return {
-          id: `look-${index}-${piece}`,
           piece,
-          image: listing.image,
-          shop: picked ? listing.store : "Exa did not pick a store",
-          address: picked ? place : shop?.address || place,
-          miles: picked ? 0 : shop?.miles ?? 0,
-          lat: shop?.lat ?? lat,
-          lng: shop?.lng ?? lng,
-          url: listing.url || shop?.url || "",
-          productUrl: listing.checkout || listing.url || "",
-        } satisfies NearbyCloth;
+          url: listing?.url ?? "",
+          store: listing?.store ?? "",
+          image: listing?.image ?? "",
+        };
       }),
     );
+    const near = await nearAgent(
+      place,
+      listings.map((listing) => ({ piece: listing.piece, store: listing.store, url: listing.url })),
+    ).catch(() => listings.map(() => ({ near: false, miles: 0, where: "" })));
+    const found = listings.map((listing, index) => {
+      const verdict = near[index] ?? { near: false, miles: 0, where: "" };
+      const close = verdict.near && Boolean(listing.url);
+      return {
+        id: `look-${index}-${listing.piece}`,
+        piece: listing.piece,
+        image: close ? listing.image : "",
+        shop: close ? listing.store : "Not near you",
+        address: close ? verdict.where || place : place,
+        miles: close ? verdict.miles : 0,
+        lat,
+        lng,
+        url: close ? listing.url : "",
+        productUrl: close ? listing.url : "",
+      } satisfies NearbyCloth;
+    });
+
+    const notes = [
+      `Agent 1, character: ${look.actor || "not identified"}${look.show ? ` in ${look.show}` : ""}.`,
+      `Agent 2, layers: ${layers.join(", ") || "none"}.`,
+      `Agent 3, clothes check: ${pieces.join(", ") || "none kept"}.`,
+      `Agent 4, near ${place}: ${found.filter((item) => item.url).length} of ${found.length} are close.`,
+    ];
 
     return {
       title: look.title,
@@ -266,5 +337,6 @@ export const classifyLook = createServerFn({ method: "POST" })
       place,
       pieces: found,
       exa: Boolean(process.env.EXA_API_KEY?.trim()),
+      notes,
     };
   });

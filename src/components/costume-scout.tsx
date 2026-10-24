@@ -172,13 +172,14 @@ export function CostumeScout() {
     setLookPieces([]);
     setNearby([]);
     setHits([]);
-    setLog([{ id: "start", text: "Classifying the clothes, then searching each piece near you." }]);
+    setLog([{ id: "start", text: "Four agents: character, clothing layers, clothes check, then near you." }]);
     const spot = await spotPromise;
     const here = spot ?? FALLBACK_SPOT;
     let title = text || "Uploaded look";
     let actor = "";
     let show = "";
     let foundClothes = clothesNear(here.lat, here.lng, []);
+    let agentNotes: string[] = [];
     const image = photoDataRef.current;
     try {
       if (image) {
@@ -192,6 +193,8 @@ export function CostumeScout() {
         setLookPieces(
           look.pieces.map((piece) => ({ name: piece.piece, image: piece.image, url: piece.productUrl })),
         );
+        agentNotes = look.notes;
+        setLog(look.notes.map((text, index) => ({ id: `agent-${index}`, text })));
       } else {
         setPlace(spot ? "your location" : "Whop HQ");
       }
@@ -223,23 +226,25 @@ export function CostumeScout() {
       })),
     );
     setPhase("ready");
-    const lines: LogLine[] = [];
+    const lines: LogLine[] = agentNotes.map((text, index) => ({ id: `agent-${index}`, text }));
     const push = async (textLine: string, ms: number) => {
       lines.push({ id: `${lines.length}-${textLine}`, text: textLine });
       setLog([...lines]);
       await wait(ms);
     };
-    await push("Reading the request.", 420);
-    await push(
-      image
-        ? "Classifying the clothes in the photo, and the actor if there is one."
-        : "No photo. Searching the description.",
-      40,
-    );
-    await push(
-      show ? `Actor: ${actor || "unknown"}. Show: ${show}.` : `Identified: ${title}.`,
-      40,
-    );
+    if (agentNotes.length === 0) {
+      await push("Reading the request.", 420);
+      await push(
+        image
+          ? "Classifying the clothes in the photo, and the actor if there is one."
+          : "No photo. Searching the description.",
+        40,
+      );
+      await push(
+        show ? `Actor: ${actor || "unknown"}. Show: ${show}.` : `Identified: ${title}.`,
+        40,
+      );
+    }
     await push(
       `Searching ${foundClothes.length} pieces near ${spot ? "you" : "Whop HQ"}.`,
       40,
