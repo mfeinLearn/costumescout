@@ -172,7 +172,7 @@ export function CostumeScout() {
     setLookPieces([]);
     setNearby([]);
     setHits([]);
-    setLog([{ id: "start", text: "Four agents: character, clothing layers, clothes check, then near you." }]);
+    setLog([{ id: "start", text: "Five agents: character, layers, clothes check, near you, then a live-link check." }]);
     const spot = await spotPromise;
     const here = spot ?? FALLBACK_SPOT;
     let title = text || "Uploaded look";

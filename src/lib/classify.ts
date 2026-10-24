@@ -216,6 +216,25 @@ async function clothesAgent(image: string, pieces: string[]) {
   return kept.length > 0 ? kept : pieces;
 }
 
+async function linkLive(url: string) {
+  if (!/^https?:\/\//.test(url)) return false;
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(8000),
+    });
+    const html = (await response.text()).slice(0, 2500);
+    const title = html.match(/<title>([^<]{0,140})/i)?.[1]?.toLowerCase() ?? "";
+    if (response.status === 404 || response.status === 410) return false;
+    if (title.includes("404") || title.includes("page not found") || title.includes("not found")) return false;
+    return response.status < 500;
+  } catch {
+    return false;
+  }
+}
+
 async function nearAgent(
   place: string,
   rows: { piece: string; store: string; url: string }[],
@@ -302,18 +321,22 @@ export const classifyLook = createServerFn({ method: "POST" })
         };
       }),
     );
-    const near = await nearAgent(
-      place,
-      listings.map((listing) => ({ piece: listing.piece, store: listing.store, url: listing.url })),
-    ).catch(() => listings.map(() => ({ near: false, miles: 0, where: "" })));
+    const [near, liveFlags] = await Promise.all([
+      nearAgent(
+        place,
+        listings.map((listing) => ({ piece: listing.piece, store: listing.store, url: listing.url })),
+      ).catch(() => listings.map(() => ({ near: false, miles: 0, where: "" }))),
+      Promise.all(listings.map((listing) => linkLive(listing.url))),
+    ]);
     const found = listings.map((listing, index) => {
       const verdict = near[index] ?? { near: false, miles: 0, where: "" };
-      const close = verdict.near && Boolean(listing.url);
+      const live = liveFlags[index] === true;
+      const close = verdict.near && live;
       return {
         id: `look-${index}-${listing.piece}`,
         piece: listing.piece,
         image: close ? listing.image : "",
-        shop: close ? listing.store : "Not near you",
+        shop: !listing.url ? "No store page" : !live ? "Link is a 404" : !verdict.near ? "Not near you" : listing.store,
         address: close ? verdict.where || place : place,
         miles: close ? verdict.miles : 0,
         lat,
@@ -327,7 +350,8 @@ export const classifyLook = createServerFn({ method: "POST" })
       `Agent 1, character: ${look.actor || "not identified"}${look.show ? ` in ${look.show}` : ""}.`,
       `Agent 2, layers: ${layers.join(", ") || "none"}.`,
       `Agent 3, clothes check: ${pieces.join(", ") || "none kept"}.`,
-      `Agent 4, near ${place}: ${found.filter((item) => item.url).length} of ${found.length} are close.`,
+      `Agent 4, near ${place}: ${found.filter((item) => item.shop !== "Not near you" && item.url).length} of ${found.length} are close.`,
+      `Agent 5, live link: ${liveFlags.filter(Boolean).length} of ${listings.length} pages loaded. 404s were dropped.`,
     ];
 
     return {
